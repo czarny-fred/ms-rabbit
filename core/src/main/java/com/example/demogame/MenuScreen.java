@@ -784,6 +784,17 @@ public class MenuScreen implements Screen {
         float px = PROFILE_X + 15;
         float top = PROFILE_Y + PROFILE_H;
 
+        // Profile picture or "+" in picture slot
+        if (game.profilePictureIndex >= 0 && game.profiloweTex != null
+                && game.profilePictureIndex < game.profiloweTex.length) {
+            game.batch.draw(game.profiloweTex[game.profilePictureIndex], picAreaX, picAreaY, picAreaSize, picAreaSize);
+        } else {
+            game.font.getData().setScale(1.5f);
+            game.font.setColor(new Color(0.6f, 0.6f, 0.9f, 1f));
+            game.font.draw(game.batch, "+", picAreaX + 18, picAreaY + picAreaSize - 8);
+            game.font.getData().setScale(1f);
+        }
+
         // Title (hide if player has custom name)
         if (game.playerName.equals("Gracz")) {
             game.font.getData().setScale(0.9f);
@@ -864,6 +875,81 @@ public class MenuScreen implements Screen {
         if (classInfoOpen) {
             drawClassInfoOverlay();
         }
+        if (profilePictureMenuOpen) {
+            drawProfilePictureMenu();
+        }
+    }
+
+    private void drawProfilePictureMenu() {
+        float menuW = 450;
+        float menuH = 500;
+        float menuX = W / 2f - menuW / 2f;
+        float menuY = H / 2f - menuH / 2f;
+
+        Gdx.gl.glEnable(Gdx.gl.GL_BLEND);
+        shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
+        shapeRenderer.setColor(0, 0, 0, 0.85f);
+        shapeRenderer.rect(0, 0, W, H);
+        shapeRenderer.end();
+
+        shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
+        shapeRenderer.setColor(0.1f, 0.08f, 0.15f, 1f);
+        shapeRenderer.rect(menuX, menuY, menuW, menuH);
+        shapeRenderer.end();
+        Gdx.gl.glDisable(Gdx.gl.GL_BLEND);
+
+        shapeRenderer.begin(ShapeRenderer.ShapeType.Line);
+        shapeRenderer.setColor(Color.WHITE);
+        shapeRenderer.rect(menuX, menuY, menuW, menuH);
+        shapeRenderer.end();
+
+        game.batch.begin();
+        game.font.getData().setScale(0.6f);
+        game.font.setColor(Color.WHITE);
+        game.font.draw(game.batch, "Wybierz zdjecie profilowe", menuX + 20, menuY + menuH - 20);
+        game.font.getData().setScale(0.35f);
+        game.font.setColor(Color.GRAY);
+        game.font.draw(game.batch, "ESC - zamknij", menuX + 20, menuY + 15);
+
+        if (game.profilePictureIndex == -1) {
+            // 2x2 grid
+            float picSize = 160;
+            float colX1 = W / 2f - picSize - 10;
+            float colX2 = W / 2f + 10;
+            float rowY1 = H / 2f + 40;
+            float rowY2 = H / 2f - picSize - 20;
+            for (int pi = 0; pi < 4 && game.profiloweTex != null; pi++) {
+                float picX = (pi % 2 == 0) ? colX1 : colX2;
+                float picY = (pi < 2) ? rowY1 : rowY2;
+                game.batch.draw(game.profiloweTex[pi], picX, picY, picSize, picSize);
+            }
+        } else {
+            int currentIdx = game.profilePictureIndex;
+            float bigSize = 200;
+            float bigX = W / 2f - bigSize / 2f;
+            float bigY = H / 2f + 50;
+            if (game.profiloweTex != null && currentIdx < game.profiloweTex.length) {
+                game.batch.draw(game.profiloweTex[currentIdx], bigX, bigY, bigSize, bigSize);
+            }
+            int[] others = new int[3];
+            int oi = 0;
+            for (int pi = 0; pi < 4; pi++) {
+                if (pi != currentIdx) others[oi++] = pi;
+            }
+            float smallSize = 90;
+            float gap = 20;
+            float totalW = 3 * smallSize + 2 * gap;
+            float startX = W / 2f - totalW / 2f;
+            float smallY = H / 2f - 100;
+            for (int i = 0; i < 3 && game.profiloweTex != null; i++) {
+                float sx = startX + i * (smallSize + gap);
+                if (others[i] < game.profiloweTex.length) {
+                    game.batch.draw(game.profiloweTex[others[i]], sx, smallY, smallSize, smallSize);
+                }
+            }
+        }
+        game.font.getData().setScale(1f);
+        game.batch.end();
     }
 
     private void drawClassInfoOverlay() {
