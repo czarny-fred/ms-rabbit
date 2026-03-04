@@ -92,6 +92,16 @@ public class BattleScreen implements Screen {
         "Przez", "twe", "oczy", "zielone,", "przez", "twe",
         "usta", "szkarlatne,", "przez", "te", "lata", "minione"
     };
+    // Bible verse bullets (Biblia weapon)
+    private static final String[] BIBLE_VERSES = {
+        "Wszystko mi wolno, ale ja niczemu nie oddam sie w niewole.",
+        "Nie czynie dobra, ktorego chce, ale czynie zlo, ktorego nie chce.",
+        "Kazdy, kto popelnia grzech, jest niewolnikiem grzechu.",
+        "Ku wolnosci wyswobodzil nas Chrystus.",
+        "Nie dawajcie miejsca diablu.",
+        "Duch nieczysty wraca z siedmioma gorszymi.",
+        "Nie toczymy walki przeciw krwi i cialu, lecz przeciw Zwierzchnosciom..."
+    };
     private static final int SISTER_SPECIAL_DMG = 20;
     private static final int SISTER_SPECIAL_SIZE = 80;
     private static final float SISTER_WINDUP = 1.5f;
