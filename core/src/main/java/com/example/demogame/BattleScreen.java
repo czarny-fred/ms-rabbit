@@ -1904,6 +1904,9 @@ public class BattleScreen implements Screen {
             Bullet pb = new Bullet(bx, by, dx * speed, dy * speed,
                     WEAPON_DAMAGE[currentWeapon], bSize, currentWeapon);
             pb.curveUp = (playerBulletCounter % 2 == 0);
+            if (currentWeapon == 2) {
+                pb.word = BIBLE_VERSES[MathUtils.random(BIBLE_VERSES.length - 1)];
+            }
             playerBulletCounter++;
             playerBullets.add(pb);
         }
