@@ -877,7 +877,14 @@ public class BattleScreen implements Screen {
 
         // Bullets
         for (Bullet b : playerBullets) {
-            if (b.weaponIndex >= 0) {
+            if (b.weaponIndex == 2 && b.word != null) {
+                // Bible verse bullet – draw as glowing purple text
+                float pulse = 0.75f + 0.25f * (float) Math.sin(b.age * 9f);
+                game.font.getData().setScale(0.45f);
+                game.font.setColor(0.9f, 0.35f, 1f, pulse);
+                game.font.draw(game.batch, b.word, b.pos.x, b.pos.y + 20f);
+                game.font.getData().setScale(1f);
+            } else if (b.weaponIndex >= 0) {
                 game.batch.draw(game.weaponBulletTex[b.weaponIndex], b.pos.x, b.pos.y, b.size, b.size);
             } else {
                 game.batch.draw(game.reflectedBulletTex, b.pos.x, b.pos.y, b.size, b.size);
