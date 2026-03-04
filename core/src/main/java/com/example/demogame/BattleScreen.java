@@ -2116,6 +2116,7 @@ public class BattleScreen implements Screen {
             Bullet b = playerBullets.get(i);
             b.pos.x += b.vel.x * delta;
             b.pos.y += b.vel.y * delta;
+            b.age += delta;
 
             float dist = b.pos.dst(b.startPos);
 
