@@ -1,0 +1,5 @@
+dependencies {
+    implementation project(':core')
+    implementation 'com.github.AriasaProp:gdx-teavm:1.5.0'
+    implementation 'com.badlogicgames.gdx:gdx:1.14.0'
+}

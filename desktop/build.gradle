@@ -1,0 +1,36 @@
+plugins {
+    id 'application'
+}
+
+application {
+    mainClass = 'com.example.demogame.DesktopLauncher'
+    applicationDefaultJvmArgs = []
+}
+
+dependencies {
+    implementation project(':core')
+    implementation 'com.badlogicgames.gdx:gdx-backend-lwjgl3:1.14.0'
+    implementation 'com.badlogicgames.gdx:gdx-platform:1.14.0:natives-desktop'
+    implementation 'com.badlogicgames.gdx:gdx-freetype-platform:1.14.0:natives-desktop'
+}
+
+tasks.named('run') {
+    workingDir = project(':core').file('src/main/resources')
+}
+
+// Fat JAR task for distribution (used by GitHub Actions installer build)
+tasks.register('fatJar', Jar) {
+    group = 'build'
+    archiveBaseName.set('iter-lucis')
+    archiveClassifier.set('')
+    archiveVersion.set('')
+    manifest {
+        attributes 'Main-Class': 'com.example.demogame.DesktopLauncher'
+    }
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    with jar
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    dependsOn configurations.runtimeClasspath
+}
