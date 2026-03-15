@@ -82,7 +82,7 @@ public class BattleScreen implements Screen {
     private static final int SISTER_BULLET_SIZE = 40;
     private static final float SISTER_SPECIAL_COOLDOWN = 3f;
     // Iwonka song attack
-    private static final float SONG_ATTACK_COOLDOWN  = SPECIAL_BULLET_COOLDOWN * 2f; // 2x rarer than big rabbit
+    private static final float SONG_ATTACK_COOLDOWN  = 20f; // 2x rarer than big rabbit (SPECIAL_BULLET_COOLDOWN=10 * 2)
     private static final float SONG_WORD_INTERVAL    = 0.35f;
     private static final int   SONG_WORD_DAMAGE      = 10;
     private static final float SONG_WORD_SPEED       = 230f;
@@ -92,6 +92,41 @@ public class BattleScreen implements Screen {
         "Przez", "twe", "oczy", "zielone,", "przez", "twe",
         "usta", "szkarlatne,", "przez", "te", "lata", "minione"
     };
+    // Ability slot indices
+    private static final int ABILITY_REFLECT   = 0;
+    private static final int ABILITY_HEAL      = 1;
+    private static final int ABILITY_ENLIGHTEN = 2;
+    private static final int ABILITY_PRAYER    = 3;
+    private static final int ABILITY_ZDROWAS   = 4;
+    private static final int ABILITY_SKOK         = 5;
+    private static final int ABILITY_EGZORCYZM    = 6;
+    private static final int ABILITY_BENEDYKCJA   = 7;
+    private static final int ABILITY_NAMASZCZENIE = 8;
+    // Skok (jump-slam) ability
+    private static final int   SKOK_CZYSTOSC_COST     = 45;
+    private static final float SKOK_COOLDOWN          = 15f;
+    private static final float SKOK_JUMP_VELOCITY     = 950f;
+    private static final float SKOK_FALL_GRAVITY_MULT = 4.5f;
+    private static final float SKOK_STUN_DURATION     = 3f;
+    private static final float SKOK_SHAKE_DURATION    = 0.5f;
+
+    // Egzorcyzm ability
+    private static final int   EGZORCYZM_CZYSTOSC_COST = 70;
+    private static final float EGZORCYZM_COOLDOWN       = 25f;
+    private static final float EGZORCYZM_SLOW_DURATION  = 8f;
+    private static final float EGZORCYZM_SLOW_FACTOR    = 0.5f; // enemy moves/shoots at 50% speed
+    // Benedykcja ability
+    private static final int   BENEDYKCJA_CZYSTOSC_COST = 55;
+    private static final float BENEDYKCJA_COOLDOWN       = 20f;
+    private static final float BENEDYKCJA_DURATION       = 6f;
+    private static final float BENEDYKCJA_REPEL_DIST     = 200f;
+    private static final float BENEDYKCJA_REPEL_FORCE    = 320f;
+    // Ostatnie Namaszczenie ability
+    private static final float NAMASZCZENIE_COOLDOWN     = 60f;
+    private static final float NAMASZCZENIE_INVIN        = 1.5f;
+    private static final float NAMASZCZENIE_PROTECT_DUR  = 8f;
+    private static final float NAMASZCZENIE_HP_THRESHOLD = 0.30f; // only usable at <= 30% HP
+
     // Bible verse bullets (Biblia weapon)
     private static final String[] BIBLE_VERSES = {
         "Wszystko mi wolno, ale ja niczemu nie oddam sie w niewole.",
@@ -255,9 +290,13 @@ public class BattleScreen implements Screen {
     private static final float PORTAL_H = 200;
     private static final float PORTAL_X = WORLD_W - PORTAL_W - 50;
 
-    // Drop
+    // Drop / Crate
     private static final float DROP_W = 64;
     private static final float DROP_H = 64;
+    private static final float CRATE_HOLD_TIME = 1.5f;
+    private static final float CRATE_INTERACT_DIST = 200f;
+    private static final float CRATE_ITEM_INTERVAL = 0.6f;
+    private static final int CRATE_TOTAL_ITEMS = 3;
 
     private final BattleGame game;
     private final OrthographicCamera camera;
@@ -333,6 +372,47 @@ public class BattleScreen implements Screen {
     private final Array<Bullet> playerBullets;
     private final Array<Bullet> enemyBullets;
 
+    // Local multiplayer (player 2)
+    private Rectangle player2;
+    private int player2Hp;
+    private float player2VelY;
+    private int player2JumpsLeft;
+    private boolean player2FacingLeft;
+    private boolean player2Moving;
+    private boolean player2Crouching;
+    private int player2CurrentWeapon;
+    private final int[] player2Ammo = new int[3];
+    private final float[] player2ReloadTimer = new float[3];
+    private float player2ShootTimer;
+    private float player2InvincibleTimer;
+    private final Array<Bullet> player2Bullets = new Array<>();
+    private int player2BulletCounter;
+    private boolean player2Dead;
+
+    // Player 2 czystosc & abilities
+    private int player2Czystosc;
+    private float player2CzystoscRegenDelayTimer;
+    private float player2CzystoscRegenAccumulator;
+    private boolean player2AbilityMenuOpen;
+    private float player2ReflectCooldownTimer;
+    private float player2ReflectActiveTimer;
+    private float player2HealCooldownTimer;
+    private float player2HealActiveTimer;
+    private float player2EnlightenCooldownTimer;
+    private float player2EnlightenActiveTimer;
+    private float player2SkokCooldownTimer;
+    private boolean player2SkokActive;
+    private float player2EgzorcyzmCooldownTimer;
+    private float player2BenedykcjaCooldownTimer;
+    private float player2BenedykcjaActiveTimer;
+    // Player 2 dash
+    private float player2DashCooldownTimer;
+    private float player2DashTimer;
+    private float player2DashDir;
+    // Multiplayer intro controls screen
+    private float multiplayerIntroTimer;
+    private static final float MULTIPLAYER_INTRO_DURATION = 7f;
+
     // Abilities
     private float reflectCooldownTimer;
     private float reflectActiveTimer;
@@ -348,8 +428,23 @@ public class BattleScreen implements Screen {
     private boolean sprintActive;
     private float sprintTimer;
     private float sprintCooldownTimer;
-    // Shield / relics
-    private int shield;
+    // Relics (each relic reduces damage by 10%)
+    private int relicCount;
+    private int shield; // kept for compatibility, always 0
+    // Skok ability
+    private boolean skokActive;
+    private float skokCooldownTimer;
+    private float skokStunTimer;
+    private float skokShakeTimer;
+    // Egzorcyzm
+    private float egzorcyzmCooldownTimer;
+    private float egzorcyzmSlowTimer;
+    // Benedykcja
+    private float benedykcjaCooldownTimer;
+    private float benedykcjaActiveTimer;
+    // Ostatnie Namaszczenie
+    private float namaszczenieCooldownTimer;
+    private float namaszczenieProtectTimer;
     private boolean relikwiaDropActive;
     // Song attack (Iwonka)
     private boolean songAttackActive;
@@ -415,6 +510,7 @@ public class BattleScreen implements Screen {
     private boolean paused;
     private boolean screenLeft;
     private boolean gameOver;
+    private boolean player2WonVs; // VS mode: true = player2 won, false = player1 won
     private int pauseSelection; // 0 = resume, 1 = quit
     private float scrollAmount;
     private boolean mapOpen;
@@ -460,6 +556,10 @@ public class BattleScreen implements Screen {
     private boolean iwonkaDied = false; // prevents re-triggering death animation
     private boolean dropActive;
     private float dropX, dropY;
+    private float crateHoldTimer;
+    private boolean crateOpenAnimActive;
+    private float crateOpenAnimTimer;
+    private int crateRevealCount;
     private final Rectangle portalRect = new Rectangle();
     private final Rectangle dropRect = new Rectangle();
     private final Vector3 mouseTemp = new Vector3();
@@ -499,11 +599,41 @@ public class BattleScreen implements Screen {
         fadeAlpha = 1f;
         setupLevel();
 
-        // Muzyka bitewna
-        if (game.battleMusic != null) {
-            game.backgroundMusic.stop();
-            game.battleMusic.setVolume(game.musicVolume);
-            game.battleMusic.play();
+        // Init player 2 for local multiplayer — spawn visible next to player 1
+        if (game.multiplayerMode > 0) {
+            float p2startX = W / 2f + PLAYER_W / 2f + 60f;
+            player2 = new Rectangle(p2startX, GROUND_Y, PLAYER_W, PLAYER_H);
+            player2Hp = effectiveMaxHp();
+            player2Czystosc = effectiveMaxCzystosc();
+            player2JumpsLeft = MAX_JUMPS;
+            player2FacingLeft = true;
+            player2Dead = false;
+            player2VelY = 0;
+            player2Moving = false;
+            player2Crouching = false;
+            player2CurrentWeapon = 0;
+            player2ShootTimer = 0;
+            player2InvincibleTimer = 0;
+            player2BulletCounter = 0;
+            player2AbilityMenuOpen = false;
+            player2ReflectCooldownTimer = 0;
+            player2ReflectActiveTimer = 0;
+            player2HealCooldownTimer = 0;
+            player2HealActiveTimer = 0;
+            player2EnlightenCooldownTimer = 0;
+            player2EnlightenActiveTimer = 0;
+            player2SkokCooldownTimer = 0;
+            player2SkokActive = false;
+            player2EgzorcyzmCooldownTimer = 0;
+            player2BenedykcjaCooldownTimer = 0;
+            player2BenedykcjaActiveTimer = 0;
+            player2DashCooldownTimer = 0;
+            player2DashTimer = 0;
+            player2DashDir = 1f;
+            player2CzystoscRegenDelayTimer = 0;
+            player2CzystoscRegenAccumulator = 0;
+            for (int i = 0; i < 3; i++) { player2Ammo[i] = WEAPON_MAX_AMMO[i]; player2ReloadTimer[i] = 0; }
+            multiplayerIntroTimer = MULTIPLAYER_INTRO_DURATION;
         }
     }
 
@@ -513,6 +643,19 @@ public class BattleScreen implements Screen {
         demonLevel = (level >= 6 && !demonStopped);
         portalActive = false;
         dropActive = false;
+        skokActive = false;
+        skokStunTimer = 0f;
+        skokShakeTimer = 0f;
+        egzorcyzmCooldownTimer = 0f;
+        egzorcyzmSlowTimer = 0f;
+        benedykcjaCooldownTimer = 0f;
+        benedykcjaActiveTimer = 0f;
+        namaszczenieCooldownTimer = 0f;
+        namaszczenieProtectTimer = 0f;
+        crateHoldTimer = 0f;
+        crateOpenAnimActive = false;
+        crateOpenAnimTimer = 0f;
+        crateRevealCount = 0;
         enemyFacingLeft = false;
         ogrodnikAtkActive = false;
         ogrodnikAtkImpacted = false;
@@ -541,6 +684,10 @@ public class BattleScreen implements Screen {
         } else {
             enemyMaxHp = ENEMY_MAX_HP_BASE + (level - 1) * 20;
         }
+        // Co-op: bosses are 1.5x stronger
+        if (game.multiplayerMode == 1) enemyMaxHp = (int)(enemyMaxHp * 1.5f);
+        // VS: no enemy
+        if (game.multiplayerMode == 2) enemyAlive = false;
         enemyHp = enemyMaxHp;
         enemySpeed = ENEMY_SPEED_BASE;
         enemyBulletSpeed = ENEMY_BULLET_SPEED_BASE + (level - 1) * 30f;
@@ -567,6 +714,7 @@ public class BattleScreen implements Screen {
         portalShieldUpgradeBought = false;
         enemyBullets.clear();
         playerBullets.clear();
+        player2Bullets.clear();
         miniEnemies.clear();
         prayerWords.clear();
         prayerAttackActive = false;
@@ -634,15 +782,30 @@ public class BattleScreen implements Screen {
             camera.position.y += (H / 2f - camera.position.y) * Math.min(1f, 20f * delta);
             camera.zoom += (0.45f - camera.zoom) * Math.min(1f, 20f * delta);
         } else {
-            camera.position.x = MathUtils.clamp(player.x + PLAYER_W / 2f, W / 2f, WORLD_W - W / 2f);
+            if (game.multiplayerMode > 0 && player2 != null && !player2Dead) {
+                float midX = (player.x + player2.x) / 2f + PLAYER_W / 2f;
+                camera.position.x = MathUtils.clamp(midX, W / 2f, WORLD_W - W / 2f);
+                // Adaptive zoom: zoom out when players are far apart
+                float dist = Math.abs(player2.x - player.x);
+                float targetZoom = MathUtils.clamp(1f + (dist - 400f) / 1200f, 1f, 1.6f);
+                camera.zoom += (targetZoom - camera.zoom) * Math.min(1f, 4f * delta);
+            } else {
+                camera.position.x = MathUtils.clamp(player.x + PLAYER_W / 2f, W / 2f, WORLD_W - W / 2f);
+                camera.zoom = 1.0f;
+            }
             camera.position.y = H / 2f;
-            camera.zoom = 1.0f;
         }
         // Screen shake during ZlyOgrodnik ground-slam
         if (ogrodnikAtkActive) {
             float strength = ogrodnikAtkTimer > 1.5f ? 10f : 5f;
             camera.position.x += MathUtils.random(-strength, strength);
             camera.position.y += MathUtils.random(-strength, strength);
+        }
+        // Screen shake on Skok landing
+        if (skokShakeTimer > 0) {
+            skokShakeTimer -= delta;
+            camera.position.x += MathUtils.random(-18f, 18f);
+            camera.position.y += MathUtils.random(-12f, 12f);
         }
         camera.update();
 
@@ -653,7 +816,10 @@ public class BattleScreen implements Screen {
 
         // Toggle ability menu
         if (Gdx.input.isKeyJustPressed(Input.Keys.E) && !paused && !gameOver) {
-            abilityMenuOpen = !abilityMenuOpen;
+            boolean nearCrate = dropActive && Math.abs(player.x + PLAYER_W / 2f - (dropX + DROP_W / 2f)) < CRATE_INTERACT_DIST;
+            if (!nearCrate) {
+                abilityMenuOpen = !abilityMenuOpen;
+            }
         }
 
         // Handle pause toggle / back to menu
@@ -720,7 +886,11 @@ public class BattleScreen implements Screen {
         game.batch.begin();
 
         // Background
-        if (telefonLevel) {
+        if (game.multiplayerMode == 2) {
+            for (int bx = 0; bx < WORLD_W; bx += W) {
+                game.batch.draw(game.backgroundTex, bx, 0, W, H);
+            }
+        } else if (telefonLevel) {
             for (int bx = 0; bx < WORLD_W; bx += W) {
                 game.batch.draw(game.demonTelefonBgTex, bx, 0, W, H);
             }
@@ -752,7 +922,7 @@ public class BattleScreen implements Screen {
                 game.batch.draw(playerTex, healX, player.y, healW, healH);
             } else if (playerCrouching) {
                 if (playerFacingLeft) {
-                    game.batch.draw(game.playerKucanieTex, player.x + PLAYER_W, player.y, -PLAYER_W, PLAYER_H);
+                    game.batch.draw(game.playerKucanieLeftTex, player.x, player.y, PLAYER_W, PLAYER_H);
                 } else {
                     game.batch.draw(game.playerKucanieTex, player.x, player.y, PLAYER_W, PLAYER_H);
                 }
@@ -775,6 +945,33 @@ public class BattleScreen implements Screen {
                 game.batch.draw(playerTex, player.x, player.y, PLAYER_W, PLAYER_H);
             }
             game.batch.setColor(1f, 1f, 1f, 1f);
+        }
+
+        // Player 2 (local multiplayer)
+        if (game.multiplayerMode > 0 && player2 != null && !player2Dead) {
+            if (player2InvincibleTimer <= 0 || (int)(player2InvincibleTimer * 10) % 2 == 0) {
+                game.batch.setColor(1f, 0.45f, 0.45f, 1f); // red tint = player 2
+                Texture p2Tex;
+                if (player2Crouching) {
+                    p2Tex = player2FacingLeft ? game.playerKucanieLeftTex : game.playerKucanieTex;
+                } else if (player2FacingLeft) {
+                    switch (player2CurrentWeapon) {
+                        case 0: p2Tex = game.playerKropidloLeftTex; break;
+                        case 1: p2Tex = game.playerKadzidloLeftTex; break;
+                        case 2: p2Tex = game.playerBibliaLeftTex; break;
+                        default: p2Tex = game.playerLeftTex; break;
+                    }
+                } else {
+                    switch (player2CurrentWeapon) {
+                        case 0: p2Tex = game.playerKropidloTex; break;
+                        case 1: p2Tex = game.playerKadzidloTex; break;
+                        case 2: p2Tex = game.playerBibliaTex; break;
+                        default: p2Tex = game.playerRightTex; break;
+                    }
+                }
+                game.batch.draw(p2Tex, player2.x, player2.y, PLAYER_W, PLAYER_H);
+                game.batch.setColor(1f, 1f, 1f, 1f);
+            }
         }
 
         // Angel (next to player, close to priest)
@@ -924,6 +1121,16 @@ public class BattleScreen implements Screen {
             }
         }
 
+        // Player 2 bullets
+        if (game.multiplayerMode > 0) {
+            for (Bullet b : player2Bullets) {
+                Texture bulletTex = game.weaponBulletTex[MathUtils.clamp(b.weaponIndex, 0, 2)];
+                game.batch.setColor(1f, 0.5f, 0.5f, 1f);
+                game.batch.draw(bulletTex, b.pos.x, b.pos.y, b.size, b.size);
+                game.batch.setColor(1f, 1f, 1f, 1f);
+            }
+        }
+
         // Portal
         if (portalActive) {
             game.batch.draw(game.portalTex, PORTAL_X, GROUND_Y, PORTAL_W, PORTAL_H);
@@ -934,9 +1141,25 @@ public class BattleScreen implements Screen {
             game.batch.draw(game.zlyOgrodnikAtakTex, ogrodnikAtkX, ogrodnikAtkY, ENEMY_W, OGRODNIK_H);
         }
 
-        // Drop from enemy
+        // Crate from enemy
         if (dropActive) {
-            game.batch.draw(game.dropTex, dropX, dropY, DROP_W, DROP_H);
+            Texture crateTex = crateOpenAnimActive ? game.skrzynka2Tex : game.skrzynka1Tex;
+            game.batch.draw(crateTex, dropX, dropY, DROP_W, DROP_H);
+            // Items revealed one by one during opening animation
+            Texture[] crateItemTex = {game.czystoscUpgradeTex, game.hpUpgradeTex, game.kasaTex};
+            float itemSize = 40f;
+            float[] itemOffsets = {-itemSize - 5f, DROP_W / 2f - itemSize / 2f, DROP_W + 5f};
+            for (int ci = 0; ci < crateRevealCount; ci++) {
+                game.batch.draw(crateItemTex[ci], dropX + itemOffsets[ci], dropY + DROP_H + 5f, itemSize, itemSize);
+            }
+            // Hint text when player is near
+            float playerCxHint = player.x + PLAYER_W / 2f;
+            if (!crateOpenAnimActive && Math.abs(playerCxHint - (dropX + DROP_W / 2f)) < CRATE_INTERACT_DIST) {
+                game.font.getData().setScale(0.6f);
+                game.font.setColor(Color.WHITE);
+                game.font.draw(game.batch, "[E] Otworz", dropX - 5f, dropY + DROP_H + 30f);
+                game.font.getData().setScale(1f);
+            }
         }
 
         // Ladder items at top (level 3)
@@ -1049,6 +1272,59 @@ public class BattleScreen implements Screen {
 
         game.batch.end();
 
+        // Crate hold-progress bar
+        if (dropActive && !crateOpenAnimActive && crateHoldTimer > 0f) {
+            float playerCxBar = player.x + PLAYER_W / 2f;
+            if (Math.abs(playerCxBar - (dropX + DROP_W / 2f)) < CRATE_INTERACT_DIST) {
+                float barW = 60f;
+                float barH = 8f;
+                float barX = dropX + DROP_W / 2f - barW / 2f;
+                float barY = dropY + DROP_H + 16f;
+                float crateProgress = crateHoldTimer / CRATE_HOLD_TIME;
+                shapeRenderer.setProjectionMatrix(camera.combined);
+                shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
+                shapeRenderer.setColor(0.3f, 0.3f, 0.3f, 1f);
+                shapeRenderer.rect(barX, barY, barW, barH);
+                shapeRenderer.setColor(0.2f, 0.9f, 0.2f, 1f);
+                shapeRenderer.rect(barX, barY, barW * crateProgress, barH);
+                shapeRenderer.end();
+            }
+        }
+
+        // Player 2 HP bar above head
+        if (game.multiplayerMode > 0 && player2 != null && !player2Dead) {
+            float barW = PLAYER_W * 0.85f;
+            float barX = player2.x + PLAYER_W * 0.075f;
+            float barY = player2.y + PLAYER_H + 12f;
+            Gdx.gl.glEnable(Gdx.gl.GL_BLEND);
+            shapeRenderer.setProjectionMatrix(camera.combined);
+            shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
+            shapeRenderer.setColor(0.25f, 0.25f, 0.25f, 0.85f);
+            shapeRenderer.rect(barX, barY, barW, 9f);
+            float hpFrac = MathUtils.clamp((float)player2Hp / effectiveMaxHp(), 0f, 1f);
+            shapeRenderer.setColor(0.9f, 0.2f, 0.2f, 1f);
+            shapeRenderer.rect(barX, barY, barW * hpFrac, 9f);
+            shapeRenderer.end();
+            Gdx.gl.glDisable(Gdx.gl.GL_BLEND);
+        }
+
+        // Player 2 czystosc bar (below HP bar)
+        if (game.multiplayerMode > 0 && player2 != null && !player2Dead) {
+            float barW = PLAYER_W * 0.85f;
+            float barX = player2.x + PLAYER_W * 0.075f;
+            float czBarY = player2.y + PLAYER_H + 1f;
+            Gdx.gl.glEnable(Gdx.gl.GL_BLEND);
+            shapeRenderer.setProjectionMatrix(camera.combined);
+            shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
+            shapeRenderer.setColor(0.15f, 0.15f, 0.35f, 0.85f);
+            shapeRenderer.rect(barX, czBarY, barW, 7f);
+            float czFrac = MathUtils.clamp((float)player2Czystosc / effectiveMaxCzystosc(), 0f, 1f);
+            shapeRenderer.setColor(0.3f, 0.5f, 1f, 1f);
+            shapeRenderer.rect(barX, czBarY, barW * czFrac, 7f);
+            shapeRenderer.end();
+            Gdx.gl.glDisable(Gdx.gl.GL_BLEND);
+        }
+
         // Drabina (drawn with ShapeRenderer)
         if (sisterLevel) drawLadder();
         // Hypnosis beam (Telefon boss)
@@ -1070,9 +1346,20 @@ public class BattleScreen implements Screen {
             drawGameOver();
         }
 
+        // Player 2 ability menu overlay
+        if (game.multiplayerMode > 0 && player2AbilityMenuOpen && player2 != null && !player2Dead) {
+            drawPlayer2AbilityMenu();
+        }
+
         // Ability menu overlay
         if (abilityMenuOpen) {
             drawAbilityMenu();
+        }
+
+        // Multiplayer intro controls screen
+        if (game.multiplayerMode > 0 && multiplayerIntroTimer > 0) {
+            multiplayerIntroTimer -= delta;
+            drawMultiplayerIntro();
         }
 
         // Prayer book overlay
@@ -1126,6 +1413,8 @@ public class BattleScreen implements Screen {
     private void advanceFromPortalShop() {
         portalShopOpen = false;
         playerHp = Math.min(effectiveMaxHp(), playerHp + 20);
+        if (game.multiplayerMode > 0 && player2 != null && !player2Dead)
+            player2Hp = Math.min(effectiveMaxHp(), player2Hp + 20);
         moneyMultiplier++;
         level++;
         setupLevel();
@@ -1134,56 +1423,150 @@ public class BattleScreen implements Screen {
         fadeAlpha = 1f;
     }
 
+    private void drawPlayer2AbilityMenu() {
+        float px = player2.x + PLAYER_W + 20;
+        float py = player2.y + PLAYER_H - 10;
+        int rowCount = 4; // 3 ability slots + close hint
+        float panelH = rowCount * 30 + 30;
+
+        Gdx.gl.glEnable(Gdx.gl.GL_BLEND);
+        shapeRenderer.setProjectionMatrix(camera.combined);
+        shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
+        shapeRenderer.setColor(0, 0, 0, 0.78f);
+        shapeRenderer.rect(px - 10, py - panelH, 310, panelH + 15);
+        shapeRenderer.end();
+        Gdx.gl.glDisable(Gdx.gl.GL_BLEND);
+
+        game.batch.begin();
+        game.font.setColor(Color.WHITE);
+        game.font.getData().setScale(0.65f);
+        String[] slotKeys = {"NUMPAD_8", "NUMPAD_9", "NUMPAD_0"};
+        String[] abilityNames = {"Odbicie", "Leczenie", "Oswiecenie", "Modlitwa", "Zdrowas", "Skok", "Egzorcyzm", "Benedykcja", "Namaszczenie"};
+        for (int i = 0; i < 3; i++) {
+            int abilityId = game.selectedAbilities[i];
+            String name = abilityId < abilityNames.length ? abilityNames[abilityId] : "?";
+            float lineY = py - i * 30 - 30;
+            game.font.draw(game.batch, slotKeys[i] + ": " + name + "  [" + player2Czystosc + "/" + effectiveMaxCzystosc() + "]", px, lineY);
+        }
+        game.font.draw(game.batch, "NUMPAD_5 - zamknij", px, py - 3 * 30 - 60);
+        game.font.getData().setScale(1f);
+        game.batch.end();
+    }
+
+    private void drawMultiplayerIntro() {
+        float cx = camera.position.x, cy = camera.position.y;
+        float alpha = Math.min(1f, multiplayerIntroTimer / 1f); // fade out in last second
+        Gdx.gl.glEnable(Gdx.gl.GL_BLEND);
+        shapeRenderer.setProjectionMatrix(camera.combined);
+        shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
+        shapeRenderer.setColor(0f, 0f, 0f, 0.82f * alpha);
+        shapeRenderer.rect(cx - W / 2f, cy - H / 2f, W, H);
+        shapeRenderer.end();
+        Gdx.gl.glDisable(Gdx.gl.GL_BLEND);
+
+        game.batch.begin();
+        game.font.setColor(1f, 1f, 1f, alpha);
+
+        // Title
+        game.font.getData().setScale(1.6f);
+        String modeTitle = game.multiplayerMode == 2 ? "TRYB VS - STEROWANIE" : "TRYB CO-OP - STEROWANIE";
+        game.font.draw(game.batch, modeTitle, cx - 220, cy + 380);
+
+        game.font.getData().setScale(1f);
+        float col1X = cx - 480;
+        float col2X = cx + 30;
+        float startY = cy + 300;
+        float lineH = 38f;
+
+        // Player 1 header
+        game.font.setColor(0.7f, 0.9f, 1f, alpha);
+        game.font.draw(game.batch, "GRACZ 1", col1X, startY);
+        game.font.setColor(1f, 1f, 1f, alpha);
+        game.font.draw(game.batch, "A / D          - ruch", col1X, startY - lineH);
+        game.font.draw(game.batch, "W              - skok", col1X, startY - lineH * 2);
+        game.font.draw(game.batch, "S              - kucanie", col1X, startY - lineH * 3);
+        game.font.draw(game.batch, "MYSZ LPM       - strzal", col1X, startY - lineH * 4);
+        game.font.draw(game.batch, "SCROLL         - zmiana broni", col1X, startY - lineH * 5);
+        game.font.draw(game.batch, "1 / 2 / 3      - bron / zdolnosc", col1X, startY - lineH * 6);
+        game.font.draw(game.batch, "E              - menu zdolnosci", col1X, startY - lineH * 7);
+        game.font.draw(game.batch, "SHIFT L        - dash", col1X, startY - lineH * 8);
+        game.font.draw(game.batch, "R              - przelad.", col1X, startY - lineH * 9);
+
+        // Player 2 header
+        game.font.setColor(1f, 0.6f, 0.6f, alpha);
+        game.font.draw(game.batch, "GRACZ 2", col2X, startY);
+        game.font.setColor(1f, 1f, 1f, alpha);
+        game.font.draw(game.batch, "STRZALKI       - ruch", col2X, startY - lineH);
+        game.font.draw(game.batch, "STRZALKA GORE  - skok", col2X, startY - lineH * 2);
+        game.font.draw(game.batch, "STRZALKA DOL   - kucanie", col2X, startY - lineH * 3);
+        game.font.draw(game.batch, "SPACJA         - strzal", col2X, startY - lineH * 4);
+        game.font.draw(game.batch, "NUM 8/9/0      - bron / zdolnosc", col2X, startY - lineH * 5);
+        game.font.draw(game.batch, "NUM 5          - menu zdolnosci", col2X, startY - lineH * 6);
+        game.font.draw(game.batch, "SHIFT P        - dash", col2X, startY - lineH * 7);
+        game.font.draw(game.batch, "NUM ENTER      - przelad.", col2X, startY - lineH * 8);
+
+        game.font.setColor(0.8f, 0.8f, 0.8f, alpha);
+        game.font.getData().setScale(0.8f);
+        game.font.draw(game.batch, "Nacisnij dowolny klawisz aby kontynuowac...", cx - 270, cy - 380);
+        game.font.getData().setScale(1f);
+        game.font.setColor(Color.WHITE);
+        game.batch.end();
+
+        // Dismiss on any key
+        if (Gdx.input.isKeyJustPressed(Input.Keys.ANY_KEY) || Gdx.input.justTouched()) {
+            multiplayerIntroTimer = 0;
+        }
+    }
+
     private void drawAbilityMenu() {
-        float px = player.x - 310;
+        float px = player.x - 320;
         float py = player.y + PLAYER_H - 10;
 
-        // Background panel
+        int rowCount = 3 + 1 + 1; // 3 ability slots + dash + close hint
+        float panelH = rowCount * 30 + 30;
+
         Gdx.gl.glEnable(Gdx.gl.GL_BLEND);
         shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
-        shapeRenderer.setColor(0, 0, 0, 0.75f);
-        shapeRenderer.rect(px - 10, py - 190, 300, 210);
+        shapeRenderer.setColor(0, 0, 0, 0.78f);
+        shapeRenderer.rect(px - 10, py - panelH, 320, panelH + 15);
         shapeRenderer.end();
         Gdx.gl.glDisable(Gdx.gl.GL_BLEND);
 
         shapeRenderer.begin(ShapeRenderer.ShapeType.Line);
         shapeRenderer.setColor(Color.WHITE);
-        shapeRenderer.rect(px - 10, py - 190, 300, 210);
+        shapeRenderer.rect(px - 10, py - panelH, 320, panelH + 15);
         shapeRenderer.end();
 
         game.batch.begin();
         game.font.getData().setScale(0.7f);
-        game.font.setColor(Color.BLACK);
+        game.font.setColor(Color.WHITE);
         game.font.draw(game.batch, "UMIEJETNOSCI:", px, py);
 
-        // Reflect
-        String reflectInfo = reflectCooldownTimer > 0 ? " [" + (int)Math.ceil(reflectCooldownTimer) + "s]" : "";
-        game.font.setColor(reflectCooldownTimer <= 0 && czystosc >= REFLECT_CZYSTOSC_COST ? Color.CYAN : Color.GRAY);
-        game.font.draw(game.batch, "1 - Odbicie " + REFLECT_CZYSTOSC_COST + reflectInfo, px, py - 28);
+        // Draw only the 3 selected abilities
+        for (int slot = 0; slot < 3; slot++) {
+            int abilityId = game.selectedAbilities[slot];
+            float cd = getAbilityCooldown(abilityId);
+            String cdStr = cd > 0 ? " [" + (int)Math.ceil(cd) + "s]" : "";
+            boolean ready = isAbilityReady(abilityId);
+            game.font.setColor(ready ? getAbilityColor(abilityId) : Color.GRAY);
+            game.font.draw(game.batch, (slot + 1) + " - " + getAbilityLabel(abilityId) + cdStr,
+                    px, py - 28 - slot * 30);
+        }
 
-        // Heal
-        String healInfo = healCooldownTimer > 0 ? " [" + (int)Math.ceil(healCooldownTimer) + "s]" : "";
-        game.font.setColor(healCooldownTimer <= 0 && czystosc >= HEAL_CZYSTOSC_COST ? Color.GREEN : Color.GRAY);
-        game.font.draw(game.batch, "2 - Leczenie(+15%HP) " + HEAL_CZYSTOSC_COST + healInfo, px, py - 56);
-
-        // Enlighten
-        String enlightenInfo = enlightenCooldownTimer > 0 ? " [" + (int)Math.ceil(enlightenCooldownTimer) + "s]" : "";
-        game.font.setColor(enlightenCooldownTimer <= 0 && czystosc >= ENLIGHTEN_CZYSTOSC_COST ? Color.YELLOW : Color.GRAY);
-        game.font.draw(game.batch, "3 - Oswiecenie " + ENLIGHTEN_CZYSTOSC_COST + enlightenInfo, px, py - 84);
-
-        // Prayer
-        game.font.setColor(hasPrayerBook ? Color.ORANGE : Color.GRAY);
-        String prayerLabel = hasPrayerBook ? "4 - Modlitwy [GOTOWE]" : "4 - Modlitwy [BRAK]";
-        game.font.draw(game.batch, prayerLabel, px, py - 112);
-
-        // Dash
+        // Dash (always available, not a slot ability)
         String dashInfo = dashCooldownTimer > 0 ? " [" + (int)Math.ceil(dashCooldownTimer) + "s]" : "";
         game.font.setColor(dashCooldownTimer <= 0 ? Color.PURPLE : Color.GRAY);
-        game.font.draw(game.batch, "SHIFT - Dash" + dashInfo, px, py - 140);
+        game.font.draw(game.batch, "SHIFT - Dash" + dashInfo, px, py - 28 - 3 * 30);
+
+        // Skok stun indicator
+        if (skokStunTimer > 0) {
+            game.font.setColor(Color.RED);
+            game.font.draw(game.batch, "OGLUSZONE: " + (int)Math.ceil(skokStunTimer) + "s", px, py - 28 - 4 * 30);
+        }
 
         game.font.getData().setScale(0.5f);
-        game.font.setColor(Color.BLACK);
-        game.font.draw(game.batch, "E - zamknij", px, py - 170);
+        game.font.setColor(Color.GRAY);
+        game.font.draw(game.batch, "E - zamknij", px, py - panelH + 12);
         game.font.getData().setScale(1f);
         game.batch.end();
     }
@@ -1412,6 +1795,15 @@ public class BattleScreen implements Screen {
         }
 
         shapeRenderer.end();
+
+        // Relic info overlay on map
+        game.batch.begin();
+        game.font.getData().setScale(0.7f);
+        game.font.setColor(relicCount > 0 ? new Color(1f, 0.75f, 0.1f, 1f) : Color.GRAY);
+        game.font.draw(game.batch, "Relikwie: " + relicCount + "   redukcja dmg: " + Math.min(relicCount * 10, 90) + "%",
+                mapX + 20, mapY + 30);
+        game.font.getData().setScale(1f);
+        game.batch.end();
     }
 
     private void update(float delta) {
@@ -1447,6 +1839,14 @@ public class BattleScreen implements Screen {
         }
         if (enlightenCooldownTimer > 0) enlightenCooldownTimer -= delta;
         if (enlightenActiveTimer > 0) enlightenActiveTimer -= delta;
+        if (skokCooldownTimer > 0) skokCooldownTimer -= delta;
+        if (skokStunTimer > 0) skokStunTimer -= delta;
+        if (egzorcyzmCooldownTimer > 0) egzorcyzmCooldownTimer -= delta;
+        if (egzorcyzmSlowTimer > 0) egzorcyzmSlowTimer -= delta;
+        if (benedykcjaCooldownTimer > 0) benedykcjaCooldownTimer -= delta;
+        if (benedykcjaActiveTimer > 0) benedykcjaActiveTimer -= delta;
+        if (namaszczenieCooldownTimer > 0) namaszczenieCooldownTimer -= delta;
+        if (namaszczenieProtectTimer > 0) namaszczenieProtectTimer -= delta;
 
         // Heal plus signs: spawn while healing, always update
         if (healActiveTimer > 0) {
@@ -1551,47 +1951,15 @@ public class BattleScreen implements Screen {
             }
         }
 
-        // Activate reflect (1 key) — requires mana
-        if (Gdx.input.isKeyJustPressed(Input.Keys.NUM_1) && reflectCooldownTimer <= 0 && reflectActiveTimer <= 0
-                && czystosc >= REFLECT_CZYSTOSC_COST) {
-            reflectActiveTimer = REFLECT_DURATION;
-            reflectCooldownTimer = REFLECT_COOLDOWN;
-            consumeCzystosc(REFLECT_CZYSTOSC_COST);
-        }
-
-        // Activate heal (2 key) — requires mana, 2s channel: no movement, invincible
-        if (Gdx.input.isKeyJustPressed(Input.Keys.NUM_2) && healCooldownTimer <= 0 && healActiveTimer <= 0
-                && czystosc >= HEAL_CZYSTOSC_COST && playerHp < effectiveMaxHp()) {
-            healActiveTimer = HEAL_DURATION;
-            int healAmount = Math.max(1, (int)(effectiveMaxHp() * HEAL_PERCENT));
-            playerHp = Math.min(effectiveMaxHp(), playerHp + healAmount);
-            healCooldownTimer = HEAL_COOLDOWN;
-            consumeCzystosc(HEAL_CZYSTOSC_COST);
-        }
-
-        // Activate enlighten (3 key) — freezes enemy, deals damage
-        if (Gdx.input.isKeyJustPressed(Input.Keys.NUM_3) && enlightenCooldownTimer <= 0
-                && enlightenActiveTimer <= 0 && czystosc >= ENLIGHTEN_CZYSTOSC_COST && enemyAlive) {
-            enlightenActiveTimer = ENLIGHTEN_DURATION;
-            enlightenCooldownTimer = ENLIGHTEN_COOLDOWN;
-            consumeCzystosc(ENLIGHTEN_CZYSTOSC_COST);
-            enemyHp -= ENLIGHTEN_DAMAGE;
-            if (enemyHp <= 0) {
-                handleEnemyKill();
-                return;
-            }
-        }
-
-        // Toggle prayer book (4 key)
-        if (Gdx.input.isKeyJustPressed(Input.Keys.NUM_4)) {
-            if (prayerAttackActive) {
-                // Cancel prayer attack
-                prayerAttackActive = false;
-                prayerBookOpen = false;
-                prayerWords.clear();
-            } else {
-                prayerBookOpen = !prayerBookOpen;
-            }
+        // 1/2/3: gdy menu E otwarte → aktywuj zdolnosc; gdy zamkniety → zmien bron
+        if (abilityMenuOpen) {
+            if (Gdx.input.isKeyJustPressed(Input.Keys.NUM_1)) { boolean r = activateSlot(0); abilityMenuOpen = false; if (r) return; }
+            if (Gdx.input.isKeyJustPressed(Input.Keys.NUM_2)) { boolean r = activateSlot(1); abilityMenuOpen = false; if (r) return; }
+            if (Gdx.input.isKeyJustPressed(Input.Keys.NUM_3)) { boolean r = activateSlot(2); abilityMenuOpen = false; if (r) return; }
+        } else {
+            if (Gdx.input.isKeyJustPressed(Input.Keys.NUM_1)) currentWeapon = 0;
+            if (Gdx.input.isKeyJustPressed(Input.Keys.NUM_2)) currentWeapon = 1;
+            if (Gdx.input.isKeyJustPressed(Input.Keys.NUM_3)) currentWeapon = 2;
         }
 
         // Click prayers in book (positioned near player, same as ability menu)
@@ -1679,6 +2047,7 @@ public class BattleScreen implements Screen {
         boolean healing = healActiveTimer > 0;
         float sprintMult = (sprintActive && playerSlowTimer <= 0) ? SPRINT_SPEED_MULT : 1f;
         float currentSpeed = playerSlowTimer > 0 ? PLAYER_SPEED * DEMON_SLOW_FACTOR : PLAYER_SPEED * sprintMult;
+        if (playerCrouching) currentSpeed *= 0.4f;
         float prevX = player.x;
         playerMoving = false;
         if (playerHypnoTimer > 0 && enemyAlive) {
@@ -1757,7 +2126,8 @@ public class BattleScreen implements Screen {
                 jumpsLeft = MAX_JUMPS;
             }
         } else {
-            playerVelY -= GRAVITY * delta;
+            float curGravity = (skokActive && playerVelY < 0) ? GRAVITY * SKOK_FALL_GRAVITY_MULT : GRAVITY;
+            playerVelY -= curGravity * delta;
             player.y += playerVelY * delta;
         }
 
@@ -1766,6 +2136,7 @@ public class BattleScreen implements Screen {
             player.y = GROUND_Y;
             playerVelY = 0;
             jumpsLeft = MAX_JUMPS;
+            if (skokActive) handleSkokLanding();
         }
         // Platform collision (pass-through: only land when falling, disabled during drop-through and ladder)
         if (playerVelY <= 0 && dropThroughTimer <= 0 && !playerOnLadder) {
@@ -1776,6 +2147,7 @@ public class BattleScreen implements Screen {
                     player.y = pTop;
                     playerVelY = 0;
                     jumpsLeft = MAX_JUMPS;
+                    if (skokActive) handleSkokLanding();
                 }
             }
         }
@@ -1833,7 +2205,7 @@ public class BattleScreen implements Screen {
         playerShootTimer -= delta;
         if (playerShootingTimer > 0) playerShootingTimer -= delta;
         boolean shootingMouse = playerHypnoTimer <= 0 && Gdx.input.isButtonPressed(Input.Buttons.LEFT);
-        boolean shootingSpace = playerHypnoTimer <= 0 && Gdx.input.isKeyPressed(Input.Keys.SPACE);
+        boolean shootingSpace = playerHypnoTimer <= 0 && game.multiplayerMode == 0 && Gdx.input.isKeyPressed(Input.Keys.SPACE);
         float hypnoSlowMult = playerAttackSlowTimer > 0 ? 2f : 1f;
 
         // Kadzidlo burst: start burst on click/press
@@ -1923,24 +2295,29 @@ public class BattleScreen implements Screen {
             playerInvincibleTimer -= delta;
         }
 
-        // Enemy AI (only when alive, frozen during enlighten and prayer attack)
-        if (enemyAlive && enlightenActiveTimer <= 0 && !prayerAttackActive) {
+        // Enemy AI (only when alive, frozen during enlighten, skok stun and prayer attack)
+        if (enemyAlive && enlightenActiveTimer <= 0 && skokStunTimer <= 0 && !prayerAttackActive) {
             // Enemy horizontal movement (chase player on ground) — frozen during special windup or ogrodnik slam
             if (specialWindupTimer <= 0 && !ogrodnikAtkActive && !songAttackActive && !hypnoWindupActive && !hypnoBeamActive) {
-                float chaseDx = (player.x + PLAYER_W / 2f) - (enemy.x + ENEMY_W / 2f);
+                // Co-op: chase nearest player
+                getEnemyTargetPos(targetTemp);
+                float chaseTargetX = targetTemp[0];
+                float chaseTargetY = targetTemp[1];
+                float chaseDx = chaseTargetX - (enemy.x + ENEMY_W / 2f);
+                float egzMoveMult = egzorcyzmSlowTimer > 0 ? EGZORCYZM_SLOW_FACTOR : 1f;
                 if (chaseDx > 0) {
-                    enemy.x += enemySpeed * delta;
+                    enemy.x += enemySpeed * egzMoveMult * delta;
                     enemyFacingLeft = false;
                 } else if (chaseDx < 0) {
-                    enemy.x -= enemySpeed * delta;
+                    enemy.x -= enemySpeed * egzMoveMult * delta;
                     enemyFacingLeft = true;
                 }
                 enemy.x = MathUtils.clamp(enemy.x, 0, WORLD_W - ENEMY_W);
 
-                // Enemy jumps when player is above
+                // Enemy jumps when target player is above
                 enemyJumpTimer -= delta;
                 boolean enemyOnGround = enemyVelY == 0;
-                if (enemyOnGround && player.y > enemy.y + ENEMY_H * 0.5f && enemyJumpTimer <= 0) {
+                if (enemyOnGround && chaseTargetY > enemy.y + ENEMY_H * 0.5f && enemyJumpTimer <= 0) {
                     enemyVelY = ENEMY_JUMP_VELOCITY;
                     enemyJumpTimer = ENEMY_JUMP_COOLDOWN;
                 }
@@ -1966,9 +2343,22 @@ public class BattleScreen implements Screen {
             }
             enemy.y = MathUtils.clamp(enemy.y, GROUND_Y, H - ENEMY_H);
 
+            // Benedykcja: repel enemy when close to player
+            if (benedykcjaActiveTimer > 0) {
+                float repelDx = (enemy.x + ENEMY_W / 2f) - (player.x + PLAYER_W / 2f);
+                float repelDy = (enemy.y + ENEMY_H / 2f) - (player.y + PLAYER_H / 2f);
+                float repelDist = (float) Math.sqrt(repelDx * repelDx + repelDy * repelDy);
+                if (repelDist < BENEDYKCJA_REPEL_DIST && repelDist > 0) {
+                    enemy.x += (repelDx / repelDist) * BENEDYKCJA_REPEL_FORCE * delta;
+                    enemy.y += (repelDy / repelDist) * BENEDYKCJA_REPEL_FORCE * delta;
+                    enemy.x = MathUtils.clamp(enemy.x, 0, WORLD_W - ENEMY_W);
+                    enemy.y = MathUtils.clamp(enemy.y, GROUND_Y, H - ENEMY_H);
+                }
+            }
+
             // Enemy shooting (burst system) — blocked after demon udko
             if (demonShootBlockTimer > 0) demonShootBlockTimer -= delta;
-            enemyShootTimer -= delta;
+            enemyShootTimer -= delta * (egzorcyzmSlowTimer > 0 ? EGZORCYZM_SLOW_FACTOR : 1f);
             if (enemyShootTimer <= 0 && demonShootBlockTimer <= 0) {
                 enemyShootTimer = enemyShootCooldown;
                 boolean doubleBurst = (demonLevel || telefonLevel) ? (level >= 9) : (level >= 5);
@@ -2150,11 +2540,22 @@ public class BattleScreen implements Screen {
                 continue;
             }
 
+            // VS mode: player1 bullets hit player2
+            if (game.multiplayerMode == 2 && player2 != null && !player2Dead && player2InvincibleTimer <= 0) {
+                Rectangle p2Hit = new Rectangle(player2.x + PLAYER_HIT_INSET_X, player2.y + PLAYER_HIT_INSET_Y, PLAYER_HIT_W, PLAYER_HIT_H);
+                if (bulletHitsRect(b, p2Hit, PLAYER_HIT_W, PLAYER_HIT_H)) {
+                    playerBullets.removeIndex(i);
+                    applyPlayer2Damage(b.damage);
+                    continue;
+                }
+            }
+
             // Check hit on enemy
             if (enemyAlive && bulletHitsRect(b, enemy, ENEMY_W, ENEMY_H)) {
                 playerBullets.removeIndex(i);
-                enemyHp -= b.damage;
-                score += 10 * b.damage;
+                int bDmg = benedykcjaActiveTimer > 0 ? b.damage * 2 : b.damage;
+                enemyHp -= bDmg;
+                score += 10 * bDmg;
                 if (enemyHp <= 0) {
                     handleEnemyKill();
                     return;
@@ -2165,15 +2566,17 @@ public class BattleScreen implements Screen {
             if (sisterLevel) {
                 if (sister1Alive && bulletHitsRect(b, sister1, SISTER_W, SISTER_H)) {
                     playerBullets.removeIndex(i);
-                    sister1Hp -= b.damage;
-                    score += 10 * b.damage;
+                    int bDmg1 = benedykcjaActiveTimer > 0 ? b.damage * 2 : b.damage;
+                    sister1Hp -= bDmg1;
+                    score += 10 * bDmg1;
                     if (sister1Hp <= 0) { sister1Alive = false; handleSisterKill(); return; }
                     continue;
                 }
                 if (sister2Alive && bulletHitsRect(b, sister2, SISTER_W, SISTER_H)) {
                     playerBullets.removeIndex(i);
-                    sister2Hp -= b.damage;
-                    score += 10 * b.damage;
+                    int bDmg2 = benedykcjaActiveTimer > 0 ? b.damage * 2 : b.damage;
+                    sister2Hp -= bDmg2;
+                    score += 10 * bDmg2;
                     if (sister2Hp <= 0) { sister2Alive = false; handleSisterKill(); return; }
                     continue;
                 }
@@ -2271,26 +2674,54 @@ public class BattleScreen implements Screen {
                 relikwiaDropActive = false;
                 relikwiaCutsceneActive = true;
                 relikwiaCutsceneTimer = 0f;
-                shield = Math.min(MAX_SHIELD, shield + SHIELD_PER_RELIC);
+                relicCount++;
                 int relikwiaHeal = Math.max(1, (int)(effectiveMaxHp() * 0.20f));
                 playerHp = Math.min(playerHp + relikwiaHeal, effectiveMaxHp());
             }
         }
 
-        // Drop pickup check
+        // Crate interaction (hold E to open)
         if (dropActive) {
-            dropRect.set(dropX, dropY, DROP_W, DROP_H);
-            if (player.overlaps(dropRect)) {
-                czystosc = effectiveMaxCzystosc();
-                dropActive = false;
+            float playerCxCrate = player.x + PLAYER_W / 2f;
+            boolean playerNearCrate = Math.abs(playerCxCrate - (dropX + DROP_W / 2f)) < CRATE_INTERACT_DIST;
+            if (!crateOpenAnimActive) {
+                if (playerNearCrate && Gdx.input.isKeyPressed(Input.Keys.E)) {
+                    crateHoldTimer += delta;
+                    if (crateHoldTimer >= CRATE_HOLD_TIME) {
+                        crateOpenAnimActive = true;
+                        crateOpenAnimTimer = 0f;
+                        crateRevealCount = 0;
+                    }
+                } else {
+                    crateHoldTimer = Math.max(0f, crateHoldTimer - delta * 2f);
+                }
+            } else {
+                crateOpenAnimTimer += delta;
+                crateRevealCount = Math.min(CRATE_TOTAL_ITEMS, (int)(crateOpenAnimTimer / CRATE_ITEM_INTERVAL) + 1);
+                if (crateOpenAnimTimer >= CRATE_ITEM_INTERVAL * CRATE_TOTAL_ITEMS + 0.5f) {
+                    czystosc = effectiveMaxCzystosc();
+                    int crateHpHeal = Math.max(1, (int)(effectiveMaxHp() * 0.20f));
+                    playerHp = Math.min(playerHp + crateHpHeal, effectiveMaxHp());
+                    int crateCoins = MathUtils.random(50, 150);
+                    game.money += crateCoins;
+                    moneyPopupAmount = crateCoins;
+                    moneyPopupTimer = 2f;
+                    dropActive = false;
+                    crateOpenAnimActive = false;
+                    crateHoldTimer = 0f;
+                }
             }
         }
 
-        // Portal check
+        // Portal check — player center must be inside the portal's central zone
         if (portalActive) {
             portalTimer += delta;
-            portalRect.set(PORTAL_X, GROUND_Y, PORTAL_W, PORTAL_H);
-            if (player.overlaps(portalRect) && !fadingToBlack && !fadingFromBlack) {
+            float playerCenterX = player.x + PLAYER_W / 2f;
+            float portalEntryLeft  = PORTAL_X + PORTAL_W * 0.30f;
+            float portalEntryRight = PORTAL_X + PORTAL_W * 0.80f;
+            if (playerCenterX >= portalEntryLeft && playerCenterX <= portalEntryRight
+                    && player.y <= GROUND_Y + 30f
+                    && !fadingToBlack && !fadingFromBlack) {
                 fadingToBlack = true;
                 fadeAlpha = 0f;
             }
@@ -2328,13 +2759,15 @@ public class BattleScreen implements Screen {
             // Update mini enemies
             for (int i = miniEnemies.size - 1; i >= 0; i--) {
                 MiniEnemy m = miniEnemies.get(i);
-                // Chase player
-                float mdx = (player.x + PLAYER_W / 2f) - (m.rect.x + MINI_W / 2f);
-                float mdy = (player.y + PLAYER_H / 2f) - (m.rect.y + MINI_H / 2f);
-                float mLen = (float) Math.sqrt(mdx * mdx + mdy * mdy);
-                if (mLen > 0) {
-                    m.rect.x += (mdx / mLen) * MINI_SPEED * delta;
-                    m.rect.y += (mdy / mLen) * MINI_SPEED * delta;
+                // Chase player (frozen during skok stun)
+                if (skokStunTimer <= 0) {
+                    float mdx = (player.x + PLAYER_W / 2f) - (m.rect.x + MINI_W / 2f);
+                    float mdy = (player.y + PLAYER_H / 2f) - (m.rect.y + MINI_H / 2f);
+                    float mLen = (float) Math.sqrt(mdx * mdx + mdy * mdy);
+                    if (mLen > 0) {
+                        m.rect.x += (mdx / mLen) * MINI_SPEED * delta;
+                        m.rect.y += (mdy / mLen) * MINI_SPEED * delta;
+                    }
                 }
 
                 // Touch player — deal damage and disappear (not during healing)
@@ -2358,6 +2791,261 @@ public class BattleScreen implements Screen {
                         break;
                     }
                 }
+            }
+        }
+
+        // ---- Player 2 update (local multiplayer) ----
+        if (game.multiplayerMode > 0 && player2 != null && !player2Dead) {
+            if (player2InvincibleTimer > 0) player2InvincibleTimer -= delta;
+            for (int i = 0; i < 3; i++) {
+                if (player2ReloadTimer[i] > 0) {
+                    player2ReloadTimer[i] -= delta;
+                    if (player2ReloadTimer[i] <= 0) { player2ReloadTimer[i] = 0; player2Ammo[i] = WEAPON_MAX_AMMO[i]; }
+                }
+            }
+            player2ShootTimer -= delta;
+
+            // Ability cooldowns
+            if (player2ReflectCooldownTimer > 0) player2ReflectCooldownTimer -= delta;
+            if (player2ReflectActiveTimer > 0)   player2ReflectActiveTimer -= delta;
+            if (player2HealCooldownTimer > 0)    player2HealCooldownTimer -= delta;
+            if (player2HealActiveTimer > 0)      player2HealActiveTimer -= delta;
+            if (player2EnlightenCooldownTimer > 0) player2EnlightenCooldownTimer -= delta;
+            if (player2EnlightenActiveTimer > 0)   player2EnlightenActiveTimer -= delta;
+            if (player2SkokCooldownTimer > 0)    player2SkokCooldownTimer -= delta;
+            if (player2EgzorcyzmCooldownTimer > 0) player2EgzorcyzmCooldownTimer -= delta;
+            if (player2BenedykcjaCooldownTimer > 0) player2BenedykcjaCooldownTimer -= delta;
+            if (player2BenedykcjaActiveTimer > 0)   player2BenedykcjaActiveTimer -= delta;
+
+            // Czystosc regen for player 2
+            if (player2CzystoscRegenDelayTimer > 0) {
+                player2CzystoscRegenDelayTimer -= delta;
+            } else if (player2Czystosc < effectiveMaxCzystosc()) {
+                player2CzystoscRegenAccumulator += CZYSTOSC_REGEN * delta;
+                if (player2CzystoscRegenAccumulator >= 1f) {
+                    int gain = (int) player2CzystoscRegenAccumulator;
+                    player2Czystosc = Math.min(effectiveMaxCzystosc(), player2Czystosc + gain);
+                    player2CzystoscRegenAccumulator -= gain;
+                }
+            }
+
+            // Dash (Right Shift)
+            if (Gdx.input.isKeyJustPressed(Input.Keys.SHIFT_RIGHT) && player2DashCooldownTimer <= 0 && player2DashTimer <= 0) {
+                player2DashDir = player2FacingLeft ? -1f : 1f;
+                player2DashTimer = DASH_DURATION;
+                player2DashCooldownTimer = DASH_COOLDOWN;
+            }
+            if (player2DashTimer > 0) {
+                player2DashTimer -= delta;
+                player2.x += player2DashDir * DASH_SPEED * delta;
+                player2.x = MathUtils.clamp(player2.x, 0, WORLD_W - PLAYER_W);
+            }
+            if (player2DashCooldownTimer > 0) player2DashCooldownTimer -= delta;
+
+            // Ability menu toggle (NUMPAD_5)
+            if (Gdx.input.isKeyJustPressed(Input.Keys.NUMPAD_5)) {
+                player2AbilityMenuOpen = !player2AbilityMenuOpen;
+            }
+
+            // 8/9/0: ability activation (menu open) or weapon switch (menu closed)
+            if (player2AbilityMenuOpen) {
+                if (Gdx.input.isKeyJustPressed(Input.Keys.NUMPAD_8)) { activateSlotPlayer2(0); player2AbilityMenuOpen = false; }
+                if (Gdx.input.isKeyJustPressed(Input.Keys.NUMPAD_9)) { activateSlotPlayer2(1); player2AbilityMenuOpen = false; }
+                if (Gdx.input.isKeyJustPressed(Input.Keys.NUMPAD_0)) { activateSlotPlayer2(2); player2AbilityMenuOpen = false; }
+            } else {
+                if (Gdx.input.isKeyJustPressed(Input.Keys.NUMPAD_8)) player2CurrentWeapon = 0;
+                if (Gdx.input.isKeyJustPressed(Input.Keys.NUMPAD_9)) player2CurrentWeapon = 1;
+                if (Gdx.input.isKeyJustPressed(Input.Keys.NUMPAD_0)) player2CurrentWeapon = 2;
+            }
+
+            // Movement (Arrow keys)
+            boolean p2left  = Gdx.input.isKeyPressed(Input.Keys.LEFT);
+            boolean p2right = Gdx.input.isKeyPressed(Input.Keys.RIGHT);
+            float p2speed = PLAYER_SPEED * (player2Crouching ? 0.4f : 1f);
+            if (p2left)  { player2.x -= p2speed * delta; player2FacingLeft = true;  player2Moving = true; }
+            else if (p2right) { player2.x += p2speed * delta; player2FacingLeft = false; player2Moving = true; }
+            else player2Moving = false;
+            player2.x = MathUtils.clamp(player2.x, 0, WORLD_W - PLAYER_W);
+
+            // Crouch (Down arrow)
+            player2Crouching = Gdx.input.isKeyPressed(Input.Keys.DOWN);
+
+            // Jump (Up arrow)
+            if (Gdx.input.isKeyJustPressed(Input.Keys.UP) && player2JumpsLeft > 0 && !player2SkokActive) {
+                player2VelY = JUMP_VELOCITY;
+                player2JumpsLeft--;
+            }
+
+            // Gravity + ground
+            player2VelY -= GRAVITY * delta;
+            player2.y += player2VelY * delta;
+            if (player2.y <= GROUND_Y) {
+                player2.y = GROUND_Y; player2VelY = 0; player2JumpsLeft = MAX_JUMPS;
+                player2SkokActive = false;
+            }
+            // Platform collision
+            if (player2VelY <= 0) {
+                for (float[] p : PLATFORMS) {
+                    float pTop = p[1] + p[3];
+                    if (player2.x + PLAYER_W > p[0] && player2.x < p[0] + p[2]
+                            && player2.y <= pTop && player2.y >= pTop - 20) {
+                        player2.y = pTop; player2VelY = 0; player2JumpsLeft = MAX_JUMPS;
+                        player2SkokActive = false;
+                    }
+                }
+            }
+
+            // Shoot (SPACE)
+            if (Gdx.input.isKeyPressed(Input.Keys.SPACE) && player2ShootTimer <= 0
+                    && player2Ammo[player2CurrentWeapon] > 0 && player2ReloadTimer[player2CurrentWeapon] <= 0) {
+                player2ShootTimer = WEAPON_COOLDOWNS[player2CurrentWeapon];
+                player2Ammo[player2CurrentWeapon]--;
+                if (player2Ammo[player2CurrentWeapon] <= 0)
+                    player2ReloadTimer[player2CurrentWeapon] = WEAPON_RELOAD_TIME[player2CurrentWeapon];
+                int bSz = WEAPON_BULLET_SIZES[player2CurrentWeapon];
+                float bx2 = player2.x + PLAYER_W / 2f - bSz / 2f;
+                float by2 = player2.y + PLAYER_H / 2f - bSz / 2f;
+                float dir = player2FacingLeft ? -1f : 1f;
+                float sp2 = WEAPON_BULLET_SPEEDS[player2CurrentWeapon];
+                Bullet p2b = new Bullet(bx2, by2, dir * sp2, 0, WEAPON_DAMAGE[player2CurrentWeapon], bSz, player2CurrentWeapon);
+                p2b.curveUp = (player2BulletCounter++ % 2 == 0);
+                player2Bullets.add(p2b);
+            }
+
+            // Reload shortcut for player2 (NUMPAD_ENTER)
+            if (Gdx.input.isKeyJustPressed(Input.Keys.NUMPAD_ENTER)
+                    && player2Ammo[player2CurrentWeapon] < WEAPON_MAX_AMMO[player2CurrentWeapon]
+                    && player2ReloadTimer[player2CurrentWeapon] <= 0) {
+                player2ReloadTimer[player2CurrentWeapon] = WEAPON_RELOAD_TIME[player2CurrentWeapon];
+            }
+
+            // Update player2 bullets
+            for (int i = player2Bullets.size - 1; i >= 0; i--) {
+                Bullet b = player2Bullets.get(i);
+                b.pos.x += b.vel.x * delta;
+                b.pos.y += b.vel.y * delta;
+                b.age += delta;
+                float dist2 = b.pos.dst(b.startPos);
+                if (b.pos.y > H || b.pos.y < -b.size || b.pos.x < -b.size || b.pos.x > WORLD_W
+                        || dist2 > PLAYER_BULLET_RANGE) {
+                    player2Bullets.removeIndex(i); continue;
+                }
+                // VS mode: player2 bullets hit player1
+                if (game.multiplayerMode == 2 && playerInvincibleTimer <= 0) {
+                    if (bulletHitsRect(b, playerHitbox, PLAYER_HIT_W, PLAYER_HIT_H)) {
+                        player2Bullets.removeIndex(i);
+                        applyPlayerDamage(b.damage, b.weaponIndex);
+                        continue;
+                    }
+                }
+                // CO-OP: player2 bullets hit enemies
+                if (game.multiplayerMode == 1 && enemyAlive && bulletHitsRect(b, enemy, ENEMY_W, ENEMY_H)) {
+                    player2Bullets.removeIndex(i);
+                    enemyHp -= b.damage;
+                    score += 10 * b.damage;
+                    if (enemyHp <= 0) { handleEnemyKill(); return; }
+                    continue;
+                }
+            }
+
+            // VS mode: enemy bullets also hit player2
+            if (game.multiplayerMode == 2) {
+                Rectangle p2Hitbox = new Rectangle(player2.x + PLAYER_HIT_INSET_X, player2.y + PLAYER_HIT_INSET_Y, PLAYER_HIT_W, PLAYER_HIT_H);
+                for (int i = enemyBullets.size - 1; i >= 0; i--) {
+                    Bullet b = enemyBullets.get(i);
+                    if (player2InvincibleTimer <= 0 && bulletHitsRect(b, p2Hitbox, PLAYER_HIT_W, PLAYER_HIT_H)) {
+                        enemyBullets.removeIndex(i);
+                        applyPlayer2Damage(b.damage);
+                    }
+                }
+            }
+        }
+    }
+
+    private void activateSlotPlayer2(int slot) {
+        if (slot < 0 || slot >= 3) return;
+        int id = game.selectedAbilities[slot];
+        switch (id) {
+            case ABILITY_REFLECT:
+                if (player2ReflectCooldownTimer <= 0 && player2ReflectActiveTimer <= 0
+                        && player2Czystosc >= REFLECT_CZYSTOSC_COST) {
+                    player2ReflectActiveTimer = REFLECT_DURATION;
+                    player2ReflectCooldownTimer = REFLECT_COOLDOWN;
+                    player2InvincibleTimer = Math.max(player2InvincibleTimer, REFLECT_DURATION);
+                    player2Czystosc -= REFLECT_CZYSTOSC_COST;
+                    player2CzystoscRegenDelayTimer = CZYSTOSC_REGEN_DELAY;
+                }
+                break;
+            case ABILITY_HEAL:
+                if (player2HealCooldownTimer <= 0 && player2HealActiveTimer <= 0
+                        && player2Czystosc >= HEAL_CZYSTOSC_COST && player2Hp < effectiveMaxHp()) {
+                    player2HealActiveTimer = HEAL_DURATION;
+                    int healAmt = Math.max(1, (int)(effectiveMaxHp() * HEAL_PERCENT));
+                    player2Hp = Math.min(effectiveMaxHp(), player2Hp + healAmt);
+                    player2HealCooldownTimer = HEAL_COOLDOWN;
+                    player2Czystosc -= HEAL_CZYSTOSC_COST;
+                    player2CzystoscRegenDelayTimer = CZYSTOSC_REGEN_DELAY;
+                }
+                break;
+            case ABILITY_ENLIGHTEN:
+                if (player2EnlightenCooldownTimer <= 0 && player2EnlightenActiveTimer <= 0
+                        && player2Czystosc >= ENLIGHTEN_CZYSTOSC_COST && enemyAlive) {
+                    player2EnlightenActiveTimer = ENLIGHTEN_DURATION;
+                    player2EnlightenCooldownTimer = ENLIGHTEN_COOLDOWN;
+                    player2Czystosc -= ENLIGHTEN_CZYSTOSC_COST;
+                    player2CzystoscRegenDelayTimer = CZYSTOSC_REGEN_DELAY;
+                    enemyHp -= ENLIGHTEN_DAMAGE;
+                    if (enemyHp <= 0) { handleEnemyKill(); return; }
+                }
+                break;
+            case ABILITY_SKOK:
+                if (player2SkokCooldownTimer <= 0 && !player2SkokActive && player2Czystosc >= SKOK_CZYSTOSC_COST) {
+                    player2VelY = SKOK_JUMP_VELOCITY;
+                    player2JumpsLeft = 0;
+                    player2SkokActive = true;
+                    player2SkokCooldownTimer = SKOK_COOLDOWN;
+                    player2Czystosc -= SKOK_CZYSTOSC_COST;
+                    player2CzystoscRegenDelayTimer = CZYSTOSC_REGEN_DELAY;
+                }
+                break;
+            case ABILITY_EGZORCYZM:
+                if (player2EgzorcyzmCooldownTimer <= 0 && player2Czystosc >= EGZORCYZM_CZYSTOSC_COST && enemyAlive) {
+                    int egzDmg = Math.max(1, (int)(enemyMaxHp * 0.30f));
+                    enemyHp -= egzDmg;
+                    score += 10 * egzDmg;
+                    egzorcyzmSlowTimer = EGZORCYZM_SLOW_DURATION;
+                    player2EgzorcyzmCooldownTimer = EGZORCYZM_COOLDOWN;
+                    player2Czystosc -= EGZORCYZM_CZYSTOSC_COST;
+                    player2CzystoscRegenDelayTimer = CZYSTOSC_REGEN_DELAY;
+                    if (enemyHp <= 0) { handleEnemyKill(); return; }
+                }
+                break;
+            case ABILITY_BENEDYKCJA:
+                if (player2BenedykcjaCooldownTimer <= 0 && player2BenedykcjaActiveTimer <= 0
+                        && player2Czystosc >= BENEDYKCJA_CZYSTOSC_COST) {
+                    player2BenedykcjaActiveTimer = BENEDYKCJA_DURATION;
+                    player2BenedykcjaCooldownTimer = BENEDYKCJA_COOLDOWN;
+                    player2Czystosc -= BENEDYKCJA_CZYSTOSC_COST;
+                    player2CzystoscRegenDelayTimer = CZYSTOSC_REGEN_DELAY;
+                }
+                break;
+            default:
+                break;
+        }
+    }
+
+    private void applyPlayer2Damage(int damage) {
+        player2Hp -= damage;
+        player2InvincibleTimer = 1.5f;
+        if (player2Hp <= 0) {
+            player2Hp = 0;
+            player2Dead = true;
+            if (game.multiplayerMode == 2) {
+                // VS: player2 died → player1 wins
+                player2WonVs = false;
+                gameOver = true;
+                abilityMenuOpen = false;
+                game.addRecentScore(score);
             }
         }
     }
@@ -2470,14 +3158,25 @@ public class BattleScreen implements Screen {
         }
     }
 
+    /** Zwraca centrum gracza (lub aniolka) najbliższego wrogu — w co-op wybiera bliższego gracza. */
     private void getEnemyTargetPos(float[] out) {
         if (angelEnraged) {
             out[0] = player.x + PLAYER_W - 40 + ANGEL_W * 1.5f;
             out[1] = player.y + ANGEL_H * 1.5f;
-        } else {
-            out[0] = player.x + PLAYER_W / 2f;
-            out[1] = player.y + PLAYER_H / 2f;
+            return;
         }
+        if (game.multiplayerMode == 1 && player2 != null && !player2Dead) {
+            float ex = enemy.x + ENEMY_W / 2f, ey = enemy.y + ENEMY_H / 2f;
+            float d1 = Math.abs((player.x + PLAYER_W / 2f) - ex) + Math.abs((player.y + PLAYER_H / 2f) - ey);
+            float d2 = Math.abs((player2.x + PLAYER_W / 2f) - ex) + Math.abs((player2.y + PLAYER_H / 2f) - ey);
+            if (d2 < d1) {
+                out[0] = player2.x + PLAYER_W / 2f;
+                out[1] = player2.y + PLAYER_H / 2f;
+                return;
+            }
+        }
+        out[0] = player.x + PLAYER_W / 2f;
+        out[1] = player.y + PLAYER_H / 2f;
     }
 
     private final float[] targetTemp = new float[2];
@@ -2615,6 +3314,52 @@ public class BattleScreen implements Screen {
             Gdx.gl.glDisable(Gdx.gl.GL_BLEND);
         }
 
+        // Benedykcja: golden aura around player
+        if (benedykcjaActiveTimer > 0) {
+            float pulse = 0.15f + 0.10f * (float) Math.sin(benedykcjaActiveTimer * 8f);
+            Gdx.gl.glEnable(Gdx.gl.GL_BLEND);
+            shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
+            shapeRenderer.setColor(1f, 0.85f, 0.1f, pulse);
+            shapeRenderer.circle(player.x + PLAYER_W / 2f, player.y + PLAYER_H / 2f, 110, 32);
+            shapeRenderer.end();
+            shapeRenderer.begin(ShapeRenderer.ShapeType.Line);
+            shapeRenderer.setColor(1f, 0.9f, 0.2f, 0.9f);
+            shapeRenderer.circle(player.x + PLAYER_W / 2f, player.y + PLAYER_H / 2f, 110, 32);
+            shapeRenderer.circle(player.x + PLAYER_W / 2f, player.y + PLAYER_H / 2f, 125, 24);
+            shapeRenderer.end();
+            Gdx.gl.glDisable(Gdx.gl.GL_BLEND);
+        }
+
+        // Egzorcyzm slow: purple aura around enemy
+        if (egzorcyzmSlowTimer > 0 && enemyAlive) {
+            float pulse = 0.12f + 0.08f * (float) Math.sin(egzorcyzmSlowTimer * 6f);
+            Gdx.gl.glEnable(Gdx.gl.GL_BLEND);
+            shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
+            shapeRenderer.setColor(0.6f, 0.1f, 0.9f, pulse);
+            shapeRenderer.circle(enemy.x + ENEMY_W / 2f, enemy.y + ENEMY_H / 2f, 80, 32);
+            shapeRenderer.end();
+            shapeRenderer.begin(ShapeRenderer.ShapeType.Line);
+            shapeRenderer.setColor(0.7f, 0.2f, 1f, 0.8f);
+            shapeRenderer.circle(enemy.x + ENEMY_W / 2f, enemy.y + ENEMY_H / 2f, 80, 32);
+            shapeRenderer.end();
+            Gdx.gl.glDisable(Gdx.gl.GL_BLEND);
+        }
+
+        // Namaszczenie: white protective glow around player
+        if (namaszczenieProtectTimer > 0) {
+            float pulse = 0.08f + 0.06f * (float) Math.sin(namaszczenieProtectTimer * 10f);
+            Gdx.gl.glEnable(Gdx.gl.GL_BLEND);
+            shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
+            shapeRenderer.setColor(0.95f, 0.95f, 1f, pulse);
+            shapeRenderer.circle(player.x + PLAYER_W / 2f, player.y + PLAYER_H / 2f, 95, 32);
+            shapeRenderer.end();
+            shapeRenderer.begin(ShapeRenderer.ShapeType.Line);
+            shapeRenderer.setColor(1f, 1f, 1f, 0.7f);
+            shapeRenderer.circle(player.x + PLAYER_W / 2f, player.y + PLAYER_H / 2f, 95, 32);
+            shapeRenderer.end();
+            Gdx.gl.glDisable(Gdx.gl.GL_BLEND);
+        }
+
         // Enlighten effect (yellow sphere around enemy)
         if (enlightenActiveTimer > 0 && enemyAlive) {
             Gdx.gl.glEnable(Gdx.gl.GL_BLEND);
@@ -2658,14 +3403,8 @@ public class BattleScreen implements Screen {
             shapeRenderer.rect(px, hypnoBarY, barW * (playerHypnoTimer / HYPNO_PLAYER_DURATION), barH);
         }
 
-        // Shield bar (above Czystosc bar)
+        // Relics indicator (replaces shield bar)
         float spy = mpy + barH + 4;
-        shapeRenderer.setColor(Color.DARK_GRAY);
-        shapeRenderer.rect(px, spy, barW, barH);
-        if (shield > 0) {
-            shapeRenderer.setColor(SHIELD_COLOR);
-            shapeRenderer.rect(px, spy, barW * ((float) shield / MAX_SHIELD), barH);
-        }
 
         // Angel HP bar (above angel, only when enraged)
         if (angelEnraged) {
@@ -2717,8 +3456,8 @@ public class BattleScreen implements Screen {
         game.font.setColor(Color.BLACK);
         game.font.draw(game.batch, "HP", px + barW + 5, py + barH + 4);
         game.font.draw(game.batch, "CZYSTOSC", px + barW + 5, mpy + barH + 4);
-        game.font.setColor(shield > 0 ? SHIELD_COLOR : Color.DARK_GRAY);
-        game.font.draw(game.batch, "TARCZA", px + barW + 5, spy + barH + 4);
+        game.font.setColor(relicCount > 0 ? new Color(1f, 0.75f, 0.1f, 1f) : Color.DARK_GRAY);
+        game.font.draw(game.batch, "RELIKWIE: " + relicCount + " (-" + Math.min(relicCount * 10, 90) + "%)", px + barW + 5, spy + barH + 4);
         // Hypnosis / slow indicators
         if (playerHypnoTimer > 0) {
             game.font.setColor(0f, 0.6f, 1f, 1f);
@@ -2730,6 +3469,25 @@ public class BattleScreen implements Screen {
             game.font.setColor(0.4f, 0.7f, 1f, 1f);
             game.font.draw(game.batch, "SPOWOLNIENIE " + (int) Math.ceil(playerAttackSlowTimer) + "s",
                     px, mpy - 14);
+        }
+        // Benedykcja indicator
+        if (benedykcjaActiveTimer > 0) {
+            game.font.getData().setScale(0.75f);
+            game.font.setColor(1f, 0.85f, 0.1f, 1f);
+            game.font.draw(game.batch, "BENEDYKCJA " + String.format("%.1f", benedykcjaActiveTimer) + "s",
+                    px, mpy + barH + 22);
+        }
+        // Egzorcyzm slow indicator
+        if (egzorcyzmSlowTimer > 0) {
+            game.font.getData().setScale(0.6f);
+            game.font.setColor(0.7f, 0.2f, 1f, 1f);
+            game.font.draw(game.batch, "EGZORCYZM " + (int) Math.ceil(egzorcyzmSlowTimer) + "s", px, mpy - 14);
+        }
+        // Namaszczenie protection indicator
+        if (namaszczenieProtectTimer > 0) {
+            game.font.getData().setScale(0.6f);
+            game.font.setColor(0.9f, 0.9f, 1f, 1f);
+            game.font.draw(game.batch, "OCHRONA " + (int) Math.ceil(namaszczenieProtectTimer) + "s", px, mpy - 28);
         }
         // Sprint indicator
         if (sprintActive) {
@@ -2888,7 +3646,12 @@ public class BattleScreen implements Screen {
         game.batch.begin();
         game.font.setColor(Color.BLACK);
         game.font.getData().setScale(2f);
-        game.font.draw(game.batch, "KONIEC GRY", cx - 120, cy + 60);
+        if (game.multiplayerMode == 2) {
+            String winner = player2WonVs ? "WYGRAL GRACZ 2!" : "WYGRAL GRACZ 1!";
+            game.font.draw(game.batch, winner, cx - 175, cy + 60);
+        } else {
+            game.font.draw(game.batch, "KONIEC GRY", cx - 120, cy + 60);
+        }
         game.font.getData().setScale(1f);
         game.font.draw(game.batch, "Punkty: " + score, cx - 70, cy - 5);
         game.font.draw(game.batch, "Poziom: " + level, cx - 70, cy - 35);
@@ -2909,6 +3672,7 @@ public class BattleScreen implements Screen {
         if (score > game.highScore) { game.highScore = score; game.saveData(); }
         if (game.battleMusic != null) game.battleMusic.stop();
         game.backgroundMusic.play();
+        game.multiplayerMode = 0;
         screenLeft = true;
         game.setScreen(new MenuScreen(game));
         dispose();
@@ -2976,7 +3740,49 @@ public class BattleScreen implements Screen {
         abilityMenuOpen = false;
         currentWeapon = 0;
         for (int i = 0; i < 3; i++) { ammo[i] = WEAPON_MAX_AMMO[i]; reloadTimer[i] = 0; }
+        player2WonVs = false;
+        // Reset player 2 for multiplayer restart
+        if (game.multiplayerMode > 0 && player2 != null) {
+            player2Dead = false;
+            player2Hp = effectiveMaxHp();
+            player2Czystosc = effectiveMaxCzystosc();
+            player2.x = W / 2f + PLAYER_W / 2f + 60f;
+            player2.y = 30;
+            player2VelY = 0;
+            player2JumpsLeft = MAX_JUMPS;
+            player2InvincibleTimer = 0;
+            player2ShootTimer = 0;
+            player2FacingLeft = true;
+            player2Moving = false;
+            player2Crouching = false;
+            player2CurrentWeapon = 0;
+            player2BulletCounter = 0;
+            player2AbilityMenuOpen = false;
+            player2ReflectCooldownTimer = 0;
+            player2ReflectActiveTimer = 0;
+            player2HealCooldownTimer = 0;
+            player2HealActiveTimer = 0;
+            player2EnlightenCooldownTimer = 0;
+            player2EnlightenActiveTimer = 0;
+            player2SkokCooldownTimer = 0;
+            player2SkokActive = false;
+            player2EgzorcyzmCooldownTimer = 0;
+            player2BenedykcjaCooldownTimer = 0;
+            player2BenedykcjaActiveTimer = 0;
+            player2DashCooldownTimer = 0;
+            player2DashTimer = 0;
+            player2CzystoscRegenDelayTimer = 0;
+            player2CzystoscRegenAccumulator = 0;
+            for (int i = 0; i < 3; i++) { player2Ammo[i] = WEAPON_MAX_AMMO[i]; player2ReloadTimer[i] = 0; }
+            player2Bullets.clear();
+            multiplayerIntroTimer = MULTIPLAYER_INTRO_DURATION;
+        }
         setupLevel();
+        if (game.battleMusic != null && !game.battleMusic.isPlaying()) {
+            float vol = Math.max(0.3f, game.musicVolume);
+            game.battleMusic.setVolume(vol);
+            game.battleMusic.play();
+        }
     }
 
     private void drawLadder() {
@@ -3028,8 +3834,6 @@ public class BattleScreen implements Screen {
 
     private static final int   PORTAL_SHOP_HP_AMOUNT  = 100;
     private static final int   PORTAL_SHOP_CZ_AMOUNT  = 100;
-    private static final int   PORTAL_SHOP_SHIELD_AMT = 25;
-    private static final int   PORTAL_SHOP_SHIELD_PRICE = 30;
 
     private void handlePortalShopInput() {
         if (Gdx.input.isKeyJustPressed(Input.Keys.ENTER)) {
@@ -3046,7 +3850,7 @@ public class BattleScreen implements Screen {
             float itemSize = 100f;
 
             // HP upgrade (always +100)
-            float hpItemX = cx - 230;
+            float hpItemX = cx - 130;
             float hpItemY = cy - itemSize / 2f;
             if (mx >= hpItemX && mx <= hpItemX + itemSize
                     && my >= hpItemY && my <= hpItemY + itemSize
@@ -3055,13 +3859,15 @@ public class BattleScreen implements Screen {
                 game.money -= game.hpUpgradePrice;
                 game.playerBonusHp += PORTAL_SHOP_HP_AMOUNT;
                 playerHp = Math.min(playerHp + PORTAL_SHOP_HP_AMOUNT, effectiveMaxHp());
+                if (game.multiplayerMode > 0 && player2 != null && !player2Dead)
+                    player2Hp = Math.min(player2Hp + PORTAL_SHOP_HP_AMOUNT, effectiveMaxHp());
                 game.hpUpgradePrice += game.hpUpgradePrice / 4;
                 game.saveData();
                 return;
             }
 
             // Czystosc upgrade (always +100)
-            float czItemX = cx - 50;
+            float czItemX = cx + 30;
             float czItemY = cy - itemSize / 2f;
             if (mx >= czItemX && mx <= czItemX + itemSize
                     && my >= czItemY && my <= czItemY + itemSize
@@ -3070,22 +3876,9 @@ public class BattleScreen implements Screen {
                 game.money -= game.czystoscUpgradePrice;
                 game.czystoscBonusMax += PORTAL_SHOP_CZ_AMOUNT;
                 czystosc = Math.min(czystosc + PORTAL_SHOP_CZ_AMOUNT, effectiveMaxCzystosc());
+                if (game.multiplayerMode > 0 && player2 != null && !player2Dead)
+                    player2Czystosc = Math.min(player2Czystosc + PORTAL_SHOP_CZ_AMOUNT, effectiveMaxCzystosc());
                 game.czystoscUpgradePrice += game.czystoscUpgradePrice / 4;
-                game.saveData();
-                return;
-            }
-
-            // Shield upgrade (+25, one-time per run)
-            float shItemX = cx + 130;
-            float shItemY = cy - itemSize / 2f;
-            if (!portalShieldUpgradeBought
-                    && mx >= shItemX && mx <= shItemX + itemSize
-                    && my >= shItemY && my <= shItemY + itemSize
-                    && game.money >= PORTAL_SHOP_SHIELD_PRICE) {
-                game.clickSound.play(game.clickVolume);
-                game.money -= PORTAL_SHOP_SHIELD_PRICE;
-                shield = Math.min(MAX_SHIELD, shield + PORTAL_SHOP_SHIELD_AMT);
-                portalShieldUpgradeBought = true;
                 game.saveData();
                 return;
             }
@@ -3121,7 +3914,7 @@ public class BattleScreen implements Screen {
         game.font.draw(game.batch, "" + game.money, cx - 40, cy + 295);
 
         // HP upgrade item (always +100)
-        float hpItemX = cx - 230;
+        float hpItemX = cx - 130;
         float hpItemY = cy - itemSize / 2f;
         game.batch.draw(game.hpUpgradeTex, hpItemX, hpItemY, itemSize, itemSize);
         game.font.getData().setScale(0.75f);
@@ -3132,7 +3925,7 @@ public class BattleScreen implements Screen {
         game.font.draw(game.batch, "+" + PORTAL_SHOP_HP_AMOUNT + " HP", hpItemX + 10, hpItemY - 30);
 
         // Czystosc upgrade item (always +100)
-        float czItemX = cx - 50;
+        float czItemX = cx + 30;
         float czItemY = cy - itemSize / 2f;
         game.batch.draw(game.czystoscUpgradeTex, czItemX, czItemY, itemSize, itemSize);
         game.font.getData().setScale(0.75f);
@@ -3141,26 +3934,6 @@ public class BattleScreen implements Screen {
         game.font.setColor(Color.WHITE);
         game.font.getData().setScale(0.65f);
         game.font.draw(game.batch, "+" + PORTAL_SHOP_CZ_AMOUNT + " Czystosc", czItemX + 10, czItemY - 30);
-
-        // Shield upgrade item (+25, one-time)
-        float shItemX = cx + 130;
-        float shItemY = cy - itemSize / 2f;
-        if (game.relikwiaTex != null && game.relikwiaTex.length > 0) {
-            game.batch.setColor(portalShieldUpgradeBought ? 0.4f : 1f, portalShieldUpgradeBought ? 0.4f : 1f, portalShieldUpgradeBought ? 0.4f : 1f, 1f);
-            game.batch.draw(game.relikwiaTex[0], shItemX, shItemY, itemSize, itemSize);
-            game.batch.setColor(1f, 1f, 1f, 1f);
-        }
-        game.font.getData().setScale(0.75f);
-        if (portalShieldUpgradeBought) {
-            game.font.setColor(Color.GRAY);
-            game.font.draw(game.batch, "KUPIONO", shItemX, shItemY - 10);
-        } else {
-            game.font.setColor(game.money >= PORTAL_SHOP_SHIELD_PRICE ? new Color(1f, 0.8f, 0.1f, 1f) : Color.RED);
-            game.font.draw(game.batch, "Cena: " + PORTAL_SHOP_SHIELD_PRICE, shItemX, shItemY - 10);
-        }
-        game.font.setColor(new Color(1f, 0.8f, 0.1f, 1f));
-        game.font.getData().setScale(0.65f);
-        game.font.draw(game.batch, "+25 TARCZA", shItemX + 5, shItemY - 30);
 
         // SKIP button
         game.font.getData().setScale(1.2f);
@@ -3180,7 +3953,14 @@ public class BattleScreen implements Screen {
     public void resize(int width, int height) {}
 
     @Override
-    public void show() {}
+    public void show() {
+        if (game.backgroundMusic != null) game.backgroundMusic.stop();
+        if (game.battleMusic != null) {
+            float vol = Math.max(0.3f, game.musicVolume);
+            game.battleMusic.setVolume(vol);
+            game.battleMusic.play();
+        }
+    }
 
     @Override
     public void pause() {}
@@ -3197,6 +3977,169 @@ public class BattleScreen implements Screen {
     }
 
     // --- Helper methods ---
+
+    /** Handles Skok landing — stun + shake. */
+    private void handleSkokLanding() {
+        skokActive = false;
+        skokStunTimer = SKOK_STUN_DURATION;
+        skokShakeTimer = SKOK_SHAKE_DURATION;
+    }
+
+    /**
+     * Activates the ability in the given slot (0-2).
+     * Returns true if handleEnemyKill() was called (caller should return immediately).
+     */
+    private boolean activateSlot(int slot) {
+        if (slot < 0 || slot >= 3) return false;
+        int id = game.selectedAbilities[slot];
+        switch (id) {
+            case ABILITY_REFLECT:
+                if (reflectCooldownTimer <= 0 && reflectActiveTimer <= 0 && czystosc >= REFLECT_CZYSTOSC_COST) {
+                    reflectActiveTimer = REFLECT_DURATION;
+                    reflectCooldownTimer = REFLECT_COOLDOWN;
+                    consumeCzystosc(REFLECT_CZYSTOSC_COST);
+                }
+                break;
+            case ABILITY_HEAL:
+                if (healCooldownTimer <= 0 && healActiveTimer <= 0
+                        && czystosc >= HEAL_CZYSTOSC_COST && playerHp < effectiveMaxHp()) {
+                    healActiveTimer = HEAL_DURATION;
+                    int healAmount = Math.max(1, (int)(effectiveMaxHp() * HEAL_PERCENT));
+                    playerHp = Math.min(effectiveMaxHp(), playerHp + healAmount);
+                    healCooldownTimer = HEAL_COOLDOWN;
+                    consumeCzystosc(HEAL_CZYSTOSC_COST);
+                }
+                break;
+            case ABILITY_ENLIGHTEN:
+                if (enlightenCooldownTimer <= 0 && enlightenActiveTimer <= 0
+                        && czystosc >= ENLIGHTEN_CZYSTOSC_COST && enemyAlive) {
+                    enlightenActiveTimer = ENLIGHTEN_DURATION;
+                    enlightenCooldownTimer = ENLIGHTEN_COOLDOWN;
+                    consumeCzystosc(ENLIGHTEN_CZYSTOSC_COST);
+                    enemyHp -= ENLIGHTEN_DAMAGE;
+                    if (enemyHp <= 0) { handleEnemyKill(); return true; }
+                }
+                break;
+            case ABILITY_PRAYER:
+                if (prayerAttackActive) {
+                    prayerAttackActive = false;
+                    prayerBookOpen = false;
+                    prayerWords.clear();
+                } else {
+                    prayerBookOpen = !prayerBookOpen;
+                }
+                break;
+            case ABILITY_ZDROWAS:
+                prayerBookOpen = !prayerBookOpen;
+                break;
+            case ABILITY_SKOK:
+                if (skokCooldownTimer <= 0 && !skokActive && czystosc >= SKOK_CZYSTOSC_COST) {
+                    playerVelY = SKOK_JUMP_VELOCITY;
+                    jumpsLeft = 0;
+                    skokActive = true;
+                    skokCooldownTimer = SKOK_COOLDOWN;
+                    consumeCzystosc(SKOK_CZYSTOSC_COST);
+                }
+                break;
+            case ABILITY_EGZORCYZM:
+                if (egzorcyzmCooldownTimer <= 0 && czystosc >= EGZORCYZM_CZYSTOSC_COST && enemyAlive) {
+                    // Trwale zadaje 30% max HP jako obrażenia
+                    int egzDmg = Math.max(1, (int)(enemyMaxHp * 0.30f));
+                    enemyHp -= egzDmg;
+                    score += 10 * egzDmg;
+                    // Spowalnia wroga
+                    egzorcyzmSlowTimer = EGZORCYZM_SLOW_DURATION;
+                    egzorcyzmCooldownTimer = EGZORCYZM_COOLDOWN;
+                    consumeCzystosc(EGZORCYZM_CZYSTOSC_COST);
+                    if (enemyHp <= 0) { handleEnemyKill(); return true; }
+                }
+                break;
+            case ABILITY_BENEDYKCJA:
+                if (benedykcjaCooldownTimer <= 0 && benedykcjaActiveTimer <= 0 && czystosc >= BENEDYKCJA_CZYSTOSC_COST) {
+                    benedykcjaActiveTimer = BENEDYKCJA_DURATION;
+                    benedykcjaCooldownTimer = BENEDYKCJA_COOLDOWN;
+                    consumeCzystosc(BENEDYKCJA_CZYSTOSC_COST);
+                }
+                break;
+            case ABILITY_NAMASZCZENIE:
+                if (namaszczenieCooldownTimer <= 0
+                        && playerHp <= (int)(effectiveMaxHp() * NAMASZCZENIE_HP_THRESHOLD)) {
+                    // Nietykalność
+                    playerInvincibleTimer = Math.max(playerInvincibleTimer, NAMASZCZENIE_INVIN);
+                    // Ochrona przed obrażeniami
+                    namaszczenieProtectTimer = NAMASZCZENIE_PROTECT_DUR;
+                    // Reset wszystkich cooldownów
+                    reflectCooldownTimer = 0;
+                    healCooldownTimer = 0;
+                    enlightenCooldownTimer = 0;
+                    skokCooldownTimer = 0;
+                    egzorcyzmCooldownTimer = 0;
+                    benedykcjaCooldownTimer = 0;
+                    dashCooldownTimer = 0;
+                    namaszczenieCooldownTimer = NAMASZCZENIE_COOLDOWN;
+                }
+                break;
+        }
+        return false;
+    }
+
+    private Color getAbilityColor(int id) {
+        switch (id) {
+            case ABILITY_REFLECT:       return Color.CYAN;
+            case ABILITY_HEAL:          return Color.GREEN;
+            case ABILITY_ENLIGHTEN:     return Color.YELLOW;
+            case ABILITY_PRAYER:        return Color.ORANGE;
+            case ABILITY_ZDROWAS:       return new Color(1f, 0.84f, 0f, 1f);
+            case ABILITY_SKOK:          return Color.RED;
+            case ABILITY_EGZORCYZM:     return new Color(0.6f, 0.1f, 0.9f, 1f);
+            case ABILITY_BENEDYKCJA:    return new Color(1f, 0.85f, 0.1f, 1f);
+            case ABILITY_NAMASZCZENIE:  return new Color(0.9f, 0.9f, 1f, 1f);
+            default:                    return Color.WHITE;
+        }
+    }
+
+    private String getAbilityLabel(int id) {
+        switch (id) {
+            case ABILITY_REFLECT:       return "Odbicie (" + REFLECT_CZYSTOSC_COST + ")";
+            case ABILITY_HEAL:          return "Leczenie (" + HEAL_CZYSTOSC_COST + ")";
+            case ABILITY_ENLIGHTEN:     return "Oswiecenie (" + ENLIGHTEN_CZYSTOSC_COST + ")";
+            case ABILITY_PRAYER:        return "Modlitwa (" + PRAYER_CZYSTOSC_COST + ")";
+            case ABILITY_ZDROWAS:       return "Zdrowas (" + ZDROWAS_CZYSTOSC_COST + ")";
+            case ABILITY_SKOK:          return "Skok (" + SKOK_CZYSTOSC_COST + ")";
+            case ABILITY_EGZORCYZM:     return "Egzorcyzm (" + EGZORCYZM_CZYSTOSC_COST + ")";
+            case ABILITY_BENEDYKCJA:    return "Benedykcja (" + BENEDYKCJA_CZYSTOSC_COST + ")";
+            case ABILITY_NAMASZCZENIE:  return "Namaszczenie (HP<=30%)";
+            default:                    return "???";
+        }
+    }
+
+    private float getAbilityCooldown(int id) {
+        switch (id) {
+            case ABILITY_REFLECT:       return reflectCooldownTimer;
+            case ABILITY_HEAL:          return healCooldownTimer;
+            case ABILITY_ENLIGHTEN:     return enlightenCooldownTimer;
+            case ABILITY_SKOK:          return skokCooldownTimer;
+            case ABILITY_EGZORCYZM:     return egzorcyzmCooldownTimer;
+            case ABILITY_BENEDYKCJA:    return benedykcjaCooldownTimer;
+            case ABILITY_NAMASZCZENIE:  return namaszczenieCooldownTimer;
+            default:                    return 0;
+        }
+    }
+
+    private boolean isAbilityReady(int id) {
+        switch (id) {
+            case ABILITY_REFLECT:       return reflectCooldownTimer <= 0 && reflectActiveTimer <= 0 && czystosc >= REFLECT_CZYSTOSC_COST;
+            case ABILITY_HEAL:          return healCooldownTimer <= 0 && healActiveTimer <= 0 && czystosc >= HEAL_CZYSTOSC_COST && playerHp < effectiveMaxHp();
+            case ABILITY_ENLIGHTEN:     return enlightenCooldownTimer <= 0 && enlightenActiveTimer <= 0 && czystosc >= ENLIGHTEN_CZYSTOSC_COST && enemyAlive;
+            case ABILITY_PRAYER:        return hasPrayerBook && czystosc >= PRAYER_CZYSTOSC_COST;
+            case ABILITY_ZDROWAS:       return hasZdrowasBook && angelActive && !angelEnraged && czystosc >= ZDROWAS_CZYSTOSC_COST;
+            case ABILITY_SKOK:          return skokCooldownTimer <= 0 && !skokActive && czystosc >= SKOK_CZYSTOSC_COST;
+            case ABILITY_EGZORCYZM:     return egzorcyzmCooldownTimer <= 0 && czystosc >= EGZORCYZM_CZYSTOSC_COST && enemyAlive;
+            case ABILITY_BENEDYKCJA:    return benedykcjaCooldownTimer <= 0 && benedykcjaActiveTimer <= 0 && czystosc >= BENEDYKCJA_CZYSTOSC_COST;
+            case ABILITY_NAMASZCZENIE:  return namaszczenieCooldownTimer <= 0 && playerHp <= (int)(effectiveMaxHp() * NAMASZCZENIE_HP_THRESHOLD);
+            default:                    return false;
+        }
+    }
 
     /** Odejmuje czystosc i resetuje opóźnienie regeneracji. */
     private void consumeCzystosc(int cost) {
@@ -3221,11 +4164,14 @@ public class BattleScreen implements Screen {
     /** Zadaje obrażenia graczowi: nietykalność, efekty specjalne, game over. */
     private void applyPlayerDamage(int damage, int weaponIndex) {
         tryActivateAngel();
-        // Tarcza absorbuje obrażenia przed HP
-        if (shield > 0) {
-            int absorbed = Math.min(shield, damage);
-            shield -= absorbed;
-            damage -= absorbed;
+        // Ostatnie Namaszczenie: 50% damage reduction
+        if (namaszczenieProtectTimer > 0) {
+            damage = Math.max(1, damage / 2);
+        }
+        // Relikwie redukują obrażenia o 10% każda
+        if (relicCount > 0) {
+            float reduction = Math.min(0.9f, relicCount * 0.10f);
+            damage = Math.max(1, (int)(damage * (1f - reduction)));
         }
         playerHp -= damage;
         playerInvincibleTimer = 1.5f;
@@ -3236,10 +4182,11 @@ public class BattleScreen implements Screen {
             playerSlowTimer = DEMON_SLOW_DURATION;
         }
         if (playerHp <= 0) {
+            if (game.multiplayerMode == 2) player2WonVs = true; // VS: player1 died → player2 wins
             gameOver = true;
             abilityMenuOpen = false;
             prayerBookOpen = false;
-            if (score > game.highScore) { game.highScore = score; game.saveData(); }
+            game.addRecentScore(score);
         }
     }
 
@@ -3287,7 +4234,7 @@ public class BattleScreen implements Screen {
                 sisterIntroTextAlpha = Math.min(1f, sisterIntroTextAlpha + 1.5f * delta);
                 if (sisterIntroTimer <= 0) {
                     sisterIntroPhase = SINT_TEXT_HOLD;
-                    sisterIntroTimer = 2.5f;
+                    sisterIntroTimer = 5.0f;
                 }
                 break;
             case SINT_TEXT_HOLD:
@@ -3352,6 +4299,7 @@ public class BattleScreen implements Screen {
     }
 
     private void updateSistersAI(float delta) {
+        if (skokStunTimer > 0) return; // frozen during skok stun
         if (sister1ShootingTimer > 0) sister1ShootingTimer -= delta;
         if (sister2ShootingTimer > 0) sister2ShootingTimer -= delta;
 

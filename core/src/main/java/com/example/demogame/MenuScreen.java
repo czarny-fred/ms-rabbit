@@ -2,10 +2,13 @@ package com.example.demogame;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
+import com.badlogic.gdx.InputAdapter;
 import com.badlogic.gdx.Screen;
 import com.badlogic.gdx.graphics.Color;
+import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
+import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.ScreenUtils;
 
@@ -25,7 +28,7 @@ public class MenuScreen implements Screen {
 
     // Left page center (buttons)
     private static final float LEFT_CX = PANEL_X + PANEL_W / 4f + 30;
-    private static final float START_BTN_X = LEFT_CX - BTN_W / 2f + 50;
+    private static final float START_BTN_X = LEFT_CX - BTN_W / 2f + 10;
     private static final float START_BTN_Y = PANEL_Y + PANEL_H / 2f + 40;
     private static final float EXIT_BTN_X = LEFT_CX - BTN_W / 2f + 50;
     private static final float EXIT_BTN_Y = START_BTN_Y - BTN_H - 30;
@@ -34,6 +37,9 @@ public class MenuScreen implements Screen {
     private static final float RIGHT_CX = PANEL_X + PANEL_W * 3f / 4f - 60;
     private static final float ENEMIES_BTN_X = RIGHT_CX - BTN_W / 2f;
     private static final float ENEMIES_BTN_Y = PANEL_Y + 220;
+    // Equipment button (between score and BOSSY)
+    private static final float EQUIP_BTN_X = ENEMIES_BTN_X;
+    private static final float EQUIP_BTN_Y = ENEMIES_BTN_Y + BTN_H + 60;
 
     // Shop button position (top-right corner)
     private static final float SHOP_BTN_SIZE = 80;
@@ -54,6 +60,29 @@ public class MenuScreen implements Screen {
     private float shopSpentTimer;
     private float hpAnimTimer = -1f; // -1 = no animation
     private float czystoscAnimTimer = -1f;
+    private String crateResultText = "";
+    private float crateResultTimer = 0f;
+    private boolean equipmentOpen;
+    private int equipSlotSelected = 0; // which slot is highlighted (0/1/2)
+    // Ability info (mirrors BattleScreen constants for display)
+    private static final String[] ABILITY_NAMES = {"Odbicie","Leczenie","Oswiecenie","Modlitwa","Zdrowas","Skok","Egzorcyzm","Benedykcja","Namaszczenie"};
+    private static final String[] ABILITY_DESCS = {
+        "Odbija pociski przez 2s | 50 czyst. | cd 10s",
+        "Leczy 15% HP | 40 czyst. | cd 17s",
+        "Zamraza wroga, 20 dmg | 60 czyst. | cd 10s",
+        "Modlitwy slow (wymaga ksiegi) | 30 czyst.",
+        "Zdrowas Mario (wymaga ksiegi) | 40 czyst.",
+        "Skok + ogluszone wrogie 3s | 45 czyst. | cd 15s",
+        "Spowolnia wroga 8s + -30% HP max | 70 czyst. | cd 25s",
+        "Podwajasz dmg 6s + odpychasz wrogw | 55 czyst. | cd 20s",
+        "Gdy HP<=30%: reset cd + -50% dmg przez 8s | cd 60s"
+    };
+    private boolean crateAnimActive;
+    private float crateAnimTimer;
+    private float crateAnimFromX, crateAnimFromY;
+    private static final float CRATE_ANIM_GROW = 0.45f;
+    private static final float CRATE_ANIM_TOTAL = 3.2f;
+    private static final float CRATE_TARGET_SIZE = 340f;
     private boolean firstFrame = true;
     private boolean profileOpen;
     private boolean editingName;
@@ -65,7 +94,19 @@ public class MenuScreen implements Screen {
     private boolean confirmReset;
     private boolean classInfoOpen;
     private boolean profilePictureMenuOpen;
+    private boolean scoresViewOpen;
+    private float equipScrollOffset = 0f;
+    private static final float EQUIP_ROW_H = 68f;
+    private boolean twoPlayerMenuOpen;
+    // 2-player button: below EXIT on left side
+    private static final float TWO_PLAYER_BTN_X = LEFT_CX - BTN_W / 2f + 45;
+    private static final float TWO_PLAYER_BTN_Y = EXIT_BTN_Y - BTN_H - 45;
     private final Vector3 mouseTemp = new Vector3();
+
+    // Profile export / import
+    private float exportCopiedTimer = 0f;   // > 0 → show "Skopiowano!" flash
+    private boolean importProfileOpen;       // overlay showing imported profile card
+    private String  importProfileText = "";  // raw imported text to display
 
     // Intro animation (triggered when START is pressed)
     private boolean introPlaying = false;
@@ -103,6 +144,12 @@ public class MenuScreen implements Screen {
         if (shopSpentTimer > 0) shopSpentTimer -= delta;
         if (hpAnimTimer >= 0) hpAnimTimer += delta;
         if (czystoscAnimTimer >= 0) czystoscAnimTimer += delta;
+        if (crateResultTimer > 0) crateResultTimer -= delta;
+        if (exportCopiedTimer > 0) exportCopiedTimer -= delta;
+        if (crateAnimActive) {
+            crateAnimTimer += delta;
+            if (crateAnimTimer >= CRATE_ANIM_TOTAL) crateAnimActive = false;
+        }
 
         if (introPlaying) {
             introTimer += delta;
@@ -129,9 +176,24 @@ public class MenuScreen implements Screen {
             return;
         }
 
+        if (equipmentOpen) {
+            handleEquipmentInput();
+            drawEquipmentView();
+            return;
+        }
         if (shopOpen) {
             handleShopInput();
             drawShopView();
+            return;
+        }
+
+        // Scores view (overlay, close on any click)
+        if (scoresViewOpen) {
+            if (Gdx.input.justTouched() || Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE)) {
+                scoresViewOpen = false;
+            }
+            drawMainMenu();
+            drawScoresView();
             return;
         }
 
@@ -147,31 +209,38 @@ public class MenuScreen implements Screen {
             float mx = mouseTemp.x;
             float my = mouseTemp.y;
 
-            if (mx >= START_BTN_X && mx <= START_BTN_X + BTN_W
-                    && my >= START_BTN_Y && my <= START_BTN_Y + BTN_H) {
+            // START – click area matches text draw position
+            float startTx = START_BTN_X + BTN_W / 2f - 55;
+            float startTy = START_BTN_Y + BTN_H / 2f + 18;
+            if (mx >= startTx - 10 && mx <= startTx + 180 && my >= startTy - 52 && my <= startTy + 8) {
                 game.clickSound.play(game.clickVolume);
                 startGame();
                 return;
             }
-            if (mx >= EXIT_BTN_X && mx <= EXIT_BTN_X + BTN_W
-                    && my >= EXIT_BTN_Y && my <= EXIT_BTN_Y + BTN_H) {
+            // EXIT – click area matches text
+            float exitTx = EXIT_BTN_X + BTN_W / 2f - 75;
+            float exitTy = EXIT_BTN_Y + BTN_H / 2f + 18;
+            if (mx >= exitTx - 10 && mx <= exitTx + 160 && my >= exitTy - 52 && my <= exitTy + 8) {
                 game.clickSound.play(game.clickVolume);
                 Gdx.app.exit();
                 return;
             }
-            float enemiesTextX = ENEMIES_BTN_X + 30;
-            float enemiesTextTop = ENEMIES_BTN_Y + BTN_H / 2f + 50;
-            if (mx >= enemiesTextX && mx <= enemiesTextX + 230
-                    && my >= enemiesTextTop - 40 && my <= enemiesTextTop) {
+            // BOSSY – click area matches text
+            float bossyTx = ENEMIES_BTN_X + 30;
+            float bossyTy = ENEMIES_BTN_Y + BTN_H / 2f + 50;
+            if (mx >= bossyTx && mx <= bossyTx + 150 && my >= bossyTy - 36 && my <= bossyTy + 6) {
                 game.clickSound.play(game.clickVolume);
                 enemiesView = true;
                 enemiesPage = 0;
             }
-            // Shop button click
-            if (mx >= SHOP_BTN_X && mx <= SHOP_BTN_X + SHOP_BTN_SIZE
-                    && my >= SHOP_BTN_Y && my <= SHOP_BTN_Y + SHOP_BTN_SIZE) {
+            // EKWIPUNEK – click area matches text draw position
+            float equipTx = EQUIP_BTN_X + 10;
+            float equipTy = EQUIP_BTN_Y + BTN_H / 2f + 30;
+            if (mx >= equipTx && mx <= equipTx + 220 && my >= equipTy - 28 && my <= equipTy + 6) {
                 game.clickSound.play(game.clickVolume);
-                shopOpen = true;
+                equipmentOpen = true;
+                equipSlotSelected = 0;
+                equipScrollOffset = 0;
             }
             // Profile button click
             if (mx >= PROFILE_BTN_X && mx <= PROFILE_BTN_X + PROFILE_BTN_SIZE
@@ -179,6 +248,42 @@ public class MenuScreen implements Screen {
                 game.clickSound.play(game.clickVolume);
                 profileOpen = true;
                 editingName = false;
+            }
+            // 2 GRACZY button
+            float tpTx = TWO_PLAYER_BTN_X + BTN_W / 2f - 80;
+            float tpTy = TWO_PLAYER_BTN_Y + BTN_H / 2f + 18;
+            if (mx >= tpTx - 10 && mx <= tpTx + 220 && my >= tpTy - 52 && my <= tpTy + 8) {
+                game.clickSound.play(game.clickVolume);
+                twoPlayerMenuOpen = !twoPlayerMenuOpen;
+            }
+            if (twoPlayerMenuOpen) {
+                // CO-OP button
+                float coopX = tpTx; float coopY = tpTy - 70;
+                if (mx >= coopX - 10 && mx <= coopX + 160 && my >= coopY - 36 && my <= coopY + 6) {
+                    game.clickSound.play(game.clickVolume);
+                    game.multiplayerMode = 1;
+                    twoPlayerMenuOpen = false;
+                    startGame();
+                    return;
+                }
+                // VS button
+                float vsX = tpTx; float vsY = tpTy - 130;
+                if (mx >= vsX - 10 && mx <= vsX + 100 && my >= vsY - 36 && my <= vsY + 6) {
+                    game.clickSound.play(game.clickVolume);
+                    game.multiplayerMode = 2;
+                    twoPlayerMenuOpen = false;
+                    startGame();
+                    return;
+                }
+            }
+            // High score click → scores history
+            if (game.highScore > 0) {
+                float scoreTx = RIGHT_CX - 110;
+                float scoreTy = PANEL_Y + PANEL_H / 2f + 165;
+                if (mx >= scoreTx && mx <= scoreTx + 220 && my >= scoreTy - 80 && my <= scoreTy + 8) {
+                    game.clickSound.play(game.clickVolume);
+                    scoresViewOpen = true;
+                }
             }
         }
 
@@ -206,11 +311,24 @@ public class MenuScreen implements Screen {
         game.font.getData().setScale(1.2f);
         game.font.setColor(Color.BLACK);
         game.font.draw(game.batch, "BOSSY", ENEMIES_BTN_X + 30, ENEMIES_BTN_Y + BTN_H / 2f + 50);
+        game.font.getData().setScale(1.0f);
+        game.font.setColor(new Color(0.4f, 0.8f, 1f, 1f));
+        game.font.draw(game.batch, "EKWIPUNEK", EQUIP_BTN_X + 10, EQUIP_BTN_Y + BTN_H / 2f + 30);
 
-        // Shop button (graphic)
-        game.batch.draw(game.sklepTex, SHOP_BTN_X, SHOP_BTN_Y, SHOP_BTN_SIZE, SHOP_BTN_SIZE);
+        // 2 GRACZY button
+        game.font.getData().setScale(0.85f);
+        game.font.setColor(new Color(0.1f, 0.55f, 0.15f, 1f));
+        game.font.draw(game.batch, "2 GRACZY", TWO_PLAYER_BTN_X + BTN_W / 2f - 80, TWO_PLAYER_BTN_Y + BTN_H / 2f + 18);
+        if (twoPlayerMenuOpen) {
+            game.font.getData().setScale(0.75f);
+            game.font.setColor(new Color(0.2f, 0.9f, 0.4f, 1f));
+            game.font.draw(game.batch, "CO-OP", TWO_PLAYER_BTN_X + BTN_W / 2f - 70, TWO_PLAYER_BTN_Y + BTN_H / 2f - 52);
+            game.font.setColor(new Color(1f, 0.3f, 0.3f, 1f));
+            game.font.draw(game.batch, "VS", TWO_PLAYER_BTN_X + BTN_W / 2f - 50, TWO_PLAYER_BTN_Y + BTN_H / 2f - 112);
+        }
+        game.font.getData().setScale(1f);
 
-        // Profile button (top-left)
+        // Profile button (top-left) — kwadrat ze zdjeciem profilowym + nazwa ponizej
         game.batch.end();
         Gdx.gl.glEnable(Gdx.gl.GL_BLEND);
         shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
@@ -219,19 +337,296 @@ public class MenuScreen implements Screen {
         shapeRenderer.end();
         Gdx.gl.glDisable(Gdx.gl.GL_BLEND);
         shapeRenderer.begin(ShapeRenderer.ShapeType.Line);
-        shapeRenderer.setColor(Color.WHITE);
+        shapeRenderer.setColor(game.getPlayerClassColor());
         shapeRenderer.rect(PROFILE_BTN_X, PROFILE_BTN_Y, PROFILE_BTN_SIZE, PROFILE_BTN_SIZE);
         shapeRenderer.end();
         game.batch.begin();
+        // Zdjecie profilowe wewnatrz kwadratu (jesli ustawione)
+        if (game.profilePictureIndex >= 0 && game.profiloweTex != null
+                && game.profilePictureIndex < game.profiloweTex.length) {
+            game.batch.draw(game.profiloweTex[game.profilePictureIndex],
+                    PROFILE_BTN_X, PROFILE_BTN_Y, PROFILE_BTN_SIZE, PROFILE_BTN_SIZE);
+        }
+        // Nazwa gracza pod kwadratem
         game.font.setColor(game.getPlayerClassColor());
-        game.font.getData().setScale(0.5f);
-        game.font.draw(game.batch, game.playerName, PROFILE_BTN_X + 5, PROFILE_BTN_Y + PROFILE_BTN_SIZE / 2f + 8);
+        game.font.getData().setScale(0.45f);
+        game.font.draw(game.batch, game.playerName, PROFILE_BTN_X + 3, PROFILE_BTN_Y - 5);
 
         game.font.getData().setScale(1f);
         game.batch.end();
     }
 
+    private void drawScoresView() {
+        float panelW = 420, panelH = 580;
+        float panelX = W / 2f - panelW / 2f, panelY = H / 2f - panelH / 2f;
+
+        Gdx.gl.glEnable(Gdx.gl.GL_BLEND);
+        Gdx.gl.glBlendFunc(Gdx.gl.GL_SRC_ALPHA, Gdx.gl.GL_ONE_MINUS_SRC_ALPHA);
+        shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
+        shapeRenderer.setColor(0f, 0f, 0f, 0.88f);
+        shapeRenderer.rect(panelX, panelY, panelW, panelH);
+        shapeRenderer.end();
+        Gdx.gl.glDisable(Gdx.gl.GL_BLEND);
+        shapeRenderer.begin(ShapeRenderer.ShapeType.Line);
+        shapeRenderer.setColor(new Color(1f, 0.85f, 0.1f, 1f));
+        shapeRenderer.rect(panelX, panelY, panelW, panelH);
+        shapeRenderer.end();
+
+        game.batch.begin();
+        game.menuFont.getData().setScale(0.75f);
+        game.menuFont.setColor(new Color(1f, 0.85f, 0.1f, 1f));
+        game.menuFont.draw(game.batch, "HISTORIA WYNIKOW", panelX + 55, panelY + panelH - 18);
+        game.menuFont.getData().setScale(1f);
+
+        float lineY = panelY + panelH - 70;
+        float lineH = 44f;
+        for (int i = 0; i < 10; i++) {
+            int sc = game.recentScores[i];
+            if (sc == 0) break;
+            boolean best = (sc == game.highScore);
+            game.font.getData().setScale(i == 0 ? 1.1f : 0.85f);
+            game.font.setColor(best ? new Color(1f, 0.85f, 0.1f, 1f) : (i == 0 ? Color.WHITE : Color.LIGHT_GRAY));
+            game.font.draw(game.batch, (i + 1) + ".  " + sc + (best ? "  ★" : ""), panelX + 40, lineY - i * lineH);
+        }
+
+        game.font.getData().setScale(0.55f);
+        game.font.setColor(Color.GRAY);
+        game.font.draw(game.batch, "Kliknij aby zamknac", panelX + panelW / 2f - 75, panelY + 22);
+        game.font.getData().setScale(1f);
+        game.batch.end();
+    }
+
+    // Equipment layout helpers (shared between draw and input)
+    private float eqPanelX()    { return W / 2f - 480; }
+    private float eqPanelY()    { return 60; }
+    private float eqPanelW()    { return 960; }
+    private float eqPanelH()    { return 870; }
+    private float eqTopH()      { return 290; }
+    private float eqTopY()      { return eqPanelY() + eqPanelH() - 58 - eqTopH(); }  // below title
+    private float eqSkinX()     { return eqPanelX() + 35; }
+    private float eqSkinW()     { return 270; }
+    private float eqSkinH()     { return 260; }
+    private float eqSkinY()     { return eqTopY() + (eqTopH() - eqSkinH()) / 2f; }
+    private float eqSlotSize()  { return 120; }
+    private float eqSlot0X()    { return eqSkinX() + eqSkinW() + 50; }
+    private float eqSlot1X()    { return eqSlot0X() + eqSlotSize() + 22; }
+    private float eqSlot2X()    { return eqSlot1X() + eqSlotSize() + 22; }
+    private float eqSlotY()     { return eqTopY() + (eqTopH() - eqSlotSize()) / 2f; }
+    private float eqListTop()   { return eqTopY() - 42; }   // just below separator
+    private float eqListBottom(){ return eqPanelY() + 50; }
+
+    private void handleEquipmentInput() {
+        if (Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE)) {
+            game.clickSound.play(game.clickVolume);
+            equipmentOpen = false;
+            return;
+        }
+        // Arrow key scroll for list
+        if (Gdx.input.isKeyJustPressed(Input.Keys.DOWN)) {
+            float maxScroll = Math.max(0, ABILITY_NAMES.length * EQUIP_ROW_H - equipListVisibleH());
+            equipScrollOffset = MathUtils.clamp(equipScrollOffset + EQUIP_ROW_H, 0, maxScroll);
+        }
+        if (Gdx.input.isKeyJustPressed(Input.Keys.UP)) {
+            float maxScroll = Math.max(0, ABILITY_NAMES.length * EQUIP_ROW_H - equipListVisibleH());
+            equipScrollOffset = MathUtils.clamp(equipScrollOffset - EQUIP_ROW_H, 0, maxScroll);
+        }
+
+        if (!Gdx.input.justTouched()) return;
+        mouseTemp.set(Gdx.input.getX(), Gdx.input.getY(), 0);
+        camera.unproject(mouseTemp);
+        float mx = mouseTemp.x, my = mouseTemp.y;
+
+        float slotSize = eqSlotSize();
+        float slotY = eqSlotY();
+        float[] slotXs = { eqSlot0X(), eqSlot1X(), eqSlot2X() };
+
+        // Click a slot to select it
+        for (int s = 0; s < 3; s++) {
+            if (mx >= slotXs[s] && mx <= slotXs[s] + slotSize
+                    && my >= slotY && my <= slotY + slotSize) {
+                game.clickSound.play(game.clickVolume);
+                equipSlotSelected = s;
+                return;
+            }
+        }
+
+        // Click an ability in the scrollable single-column list
+        float listTop = eqListTop();
+        float listBottom = eqListBottom();
+        float listX = eqPanelX() + 20;
+        float listW = eqPanelW() - 40;
+        if (mx >= listX && mx <= listX + listW && my >= listBottom && my <= listTop) {
+            // Figure out which row was clicked (accounting for scroll)
+            float relY = listTop - my + equipScrollOffset; // distance from content top
+            int row = (int)(relY / EQUIP_ROW_H);
+            if (row >= 0 && row < ABILITY_NAMES.length) {
+                game.clickSound.play(game.clickVolume);
+                boolean alreadyInOtherSlot = false;
+                for (int s = 0; s < 3; s++) {
+                    if (s != equipSlotSelected && game.selectedAbilities[s] == row) {
+                        alreadyInOtherSlot = true;
+                        break;
+                    }
+                }
+                if (!alreadyInOtherSlot) {
+                    game.selectedAbilities[equipSlotSelected] = row;
+                    game.saveData();
+                }
+            }
+        }
+    }
+
+    private void drawEquipmentView() {
+        float panelX = eqPanelX(), panelW = eqPanelW();
+        float panelY = eqPanelY(), panelH = eqPanelH();
+        float topY     = eqTopY();
+        float skinX    = eqSkinX(), skinY = eqSkinY();
+        float skinW    = eqSkinW(), skinH  = eqSkinH();
+        float slotSize = eqSlotSize();
+        float slotY    = eqSlotY();
+        float[] slotXs = { eqSlot0X(), eqSlot1X(), eqSlot2X() };
+        float listTop    = eqListTop();
+        float listBottom = eqListBottom();
+        float listX      = panelX + 20;
+        float listW      = panelW - 40;
+
+        // ── PASS 1: background texture ──────────────────────────────────────
+        game.batch.begin();
+        game.batch.draw(game.startBgTex, 0, 0, W, H);
+        game.batch.end();
+
+        // ── PASS 2: all ShapeRenderer calls ─────────────────────────────────
+        shapeRenderer.setProjectionMatrix(camera.combined);
+        Gdx.gl.glEnable(Gdx.gl.GL_BLEND);
+        Gdx.gl.glBlendFunc(Gdx.gl.GL_SRC_ALPHA, Gdx.gl.GL_ONE_MINUS_SRC_ALPHA);
+
+        shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
+        // Panel
+        shapeRenderer.setColor(0.06f, 0.05f, 0.10f, 0.97f);
+        shapeRenderer.rect(panelX, panelY, panelW, panelH);
+        // Skin bg
+        shapeRenderer.setColor(0.12f, 0.10f, 0.18f, 1f);
+        shapeRenderer.rect(skinX - 8, skinY - 8, skinW + 16, skinH + 16);
+        // Slots
+        for (int s = 0; s < 3; s++) {
+            boolean sel = (s == equipSlotSelected);
+            shapeRenderer.setColor(sel ? 0.18f : 0.10f, sel ? 0.16f : 0.10f, sel ? 0.28f : 0.14f, 1f);
+            shapeRenderer.rect(slotXs[s], slotY, slotSize, slotSize);
+        }
+        // Separator
+        shapeRenderer.setColor(0.4f, 0.8f, 1f, 0.3f);
+        shapeRenderer.rect(panelX + 15, topY - 2, panelW - 30, 2);
+        // Row highlights for assigned abilities
+        for (int i = 0; i < ABILITY_NAMES.length; i++) {
+            float rowTop = listTop - i * EQUIP_ROW_H + equipScrollOffset;
+            float rowBot = rowTop - EQUIP_ROW_H;
+            if (rowTop < listBottom || rowBot > listTop) continue;
+            int inSlot = -1;
+            for (int s = 0; s < 3; s++) if (game.selectedAbilities[s] == i) { inSlot = s; break; }
+            if (inSlot >= 0) {
+                shapeRenderer.setColor(0.1f, 0.25f, 0.1f, 0.55f);
+                shapeRenderer.rect(listX, rowBot + 4, listW - 20, EQUIP_ROW_H - 6);
+            }
+        }
+        // Scroll bar
+        float maxScroll = Math.max(1, ABILITY_NAMES.length * EQUIP_ROW_H - equipListVisibleH());
+        if (maxScroll > 1) {
+            float trackH = listTop - listBottom;
+            float thumbH = Math.max(30, trackH * (trackH / (ABILITY_NAMES.length * EQUIP_ROW_H)));
+            float thumbY = listBottom + (trackH - thumbH) * (1f - MathUtils.clamp(equipScrollOffset / maxScroll, 0, 1));
+            shapeRenderer.setColor(0.25f, 0.25f, 0.3f, 1f);
+            shapeRenderer.rect(panelX + panelW - 18, listBottom, 8, trackH);
+            shapeRenderer.setColor(0.5f, 0.7f, 1f, 1f);
+            shapeRenderer.rect(panelX + panelW - 18, thumbY, 8, thumbH);
+        }
+        shapeRenderer.end();
+
+        shapeRenderer.begin(ShapeRenderer.ShapeType.Line);
+        shapeRenderer.setColor(0.4f, 0.8f, 1f, 1f);
+        shapeRenderer.rect(panelX, panelY, panelW, panelH);
+        shapeRenderer.setColor(0.4f, 0.8f, 1f, 0.6f);
+        shapeRenderer.rect(skinX - 8, skinY - 8, skinW + 16, skinH + 16);
+        for (int s = 0; s < 3; s++) {
+            shapeRenderer.setColor(s == equipSlotSelected ? Color.YELLOW : Color.WHITE);
+            shapeRenderer.rect(slotXs[s], slotY, slotSize, slotSize);
+            if (s == equipSlotSelected) shapeRenderer.rect(slotXs[s]+1, slotY+1, slotSize-2, slotSize-2);
+        }
+        shapeRenderer.end();
+        Gdx.gl.glDisable(Gdx.gl.GL_BLEND);
+
+        // ── PASS 3: all SpriteBatch / font calls ─────────────────────────────
+        game.batch.begin();
+
+        // Title
+        game.menuFont.getData().setScale(0.9f);
+        game.menuFont.setColor(new Color(0.4f, 0.8f, 1f, 1f));
+        game.menuFont.draw(game.batch, "EKWIPUNEK", panelX + panelW / 2f - 130, panelY + panelH - 18);
+        game.menuFont.getData().setScale(1f);
+
+        // Skin
+        Texture skinTex = game.bishopSkin ? game.biskupTex : game.playerRightTex;
+        game.batch.draw(skinTex, skinX, skinY, skinW, skinH);
+
+        // Slot labels + ability name
+        for (int s = 0; s < 3; s++) {
+            int abilId = game.selectedAbilities[s];
+            float sx = slotXs[s];
+            game.font.getData().setScale(0.5f);
+            game.font.setColor(s == equipSlotSelected ? Color.YELLOW : Color.LIGHT_GRAY);
+            game.font.draw(game.batch, "SLOT " + (s + 1), sx + 6, slotY + slotSize - 6);
+            game.font.getData().setScale(0.6f);
+            game.font.setColor(new Color(0.5f, 1f, 0.5f, 1f));
+            String name = ABILITY_NAMES[abilId];
+            int split = name.length() > 10 ? Math.max(1, name.lastIndexOf(' ', 10)) : -1;
+            if (split > 0) {
+                game.font.draw(game.batch, name.substring(0, split),        sx + 6, slotY + slotSize / 2f + 18);
+                game.font.draw(game.batch, name.substring(split).trim(),     sx + 6, slotY + slotSize / 2f - 2);
+            } else {
+                game.font.draw(game.batch, name, sx + 6, slotY + slotSize / 2f + 10);
+            }
+        }
+
+        // Slot hint
+        game.font.getData().setScale(0.48f);
+        game.font.setColor(Color.GRAY);
+        game.font.draw(game.batch, "Kliknij slot, potem umiejetnosc ponizej", slotXs[0], slotY - 12);
+
+        // List header
+        game.font.getData().setScale(0.65f);
+        game.font.setColor(Color.WHITE);
+        game.font.draw(game.batch, "DOSTEPNE UMIEJETNOSCI:", listX, listTop + 2);
+
+        // Ability rows
+        for (int i = 0; i < ABILITY_NAMES.length; i++) {
+            float rowTop = listTop - i * EQUIP_ROW_H + equipScrollOffset;
+            float rowBot = rowTop - EQUIP_ROW_H;
+            if (rowTop < listBottom || rowBot > listTop) continue;
+            int inSlot = -1;
+            for (int s = 0; s < 3; s++) if (game.selectedAbilities[s] == i) { inSlot = s; break; }
+            game.font.getData().setScale(0.75f);
+            game.font.setColor(inSlot >= 0 ? new Color(0.3f, 1f, 0.3f, 1f) : Color.WHITE);
+            game.font.draw(game.batch, ABILITY_NAMES[i] + (inSlot >= 0 ? "  [Slot " + (inSlot + 1) + "]" : ""), listX + 10, rowTop - 10);
+            game.font.getData().setScale(0.52f);
+            game.font.setColor(Color.GRAY);
+            game.font.draw(game.batch, ABILITY_DESCS[i], listX + 10, rowTop - 32);
+        }
+
+        // Footer hint
+        game.font.getData().setScale(0.52f);
+        game.font.setColor(Color.GRAY);
+        game.font.draw(game.batch, "ESC - zamknij   |   Scroll / strzalki - przewijaj", panelX + panelW / 2f - 180, panelY + 22);
+        game.font.getData().setScale(1f);
+
+        game.batch.end();
+    }
+
     private void handleShopInput() {
+        if (crateAnimActive) {
+            if (Gdx.input.justTouched() || Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE)) {
+                crateAnimActive = false;
+            }
+            return;
+        }
         if (Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE)) {
             game.clickSound.play(game.clickVolume);
             shopOpen = false;
@@ -278,12 +673,69 @@ public class MenuScreen implements Screen {
                 game.saveData();
             }
 
+            // Crates - stacked vertically, bigger
+            float crateSize = 130;
+            float crateX = SHOP_X + SHOP_W / 2f - crateSize / 2f;
+            float crate1Y = H - 730;
+            float crate2Y = crate1Y - crateSize - 18;
+            int crateCost = 1000;
+            if (mx >= crateX && mx <= crateX + crateSize
+                    && my >= crate1Y && my <= crate1Y + crateSize
+                    && game.money >= crateCost) {
+                game.clickSound.play(game.clickVolume);
+                game.money -= crateCost;
+                shopSpentAmount = crateCost;
+                shopSpentTimer = 2f;
+                applyCrateReward();
+                crateAnimActive = true;
+                crateAnimTimer = 0f;
+                crateAnimFromX = crateX + crateSize / 2f;
+                crateAnimFromY = crate1Y + crateSize / 2f;
+                game.saveData();
+            }
+            if (mx >= crateX && mx <= crateX + crateSize
+                    && my >= crate2Y && my <= crate2Y + crateSize
+                    && game.money >= crateCost) {
+                game.clickSound.play(game.clickVolume);
+                game.money -= crateCost;
+                shopSpentAmount = crateCost;
+                shopSpentTimer = 2f;
+                applyCrateReward();
+                crateAnimActive = true;
+                crateAnimTimer = 0f;
+                crateAnimFromX = crateX + crateSize / 2f;
+                crateAnimFromY = crate2Y + crateSize / 2f;
+                game.saveData();
+            }
+
             // Click outside shop panel closes it
             if (mx < SHOP_X) {
                 game.clickSound.play(game.clickVolume);
                 shopOpen = false;
             }
         }
+    }
+
+    private void applyCrateReward() {
+        int roll = (int)(Math.random() * 3);
+        if (roll == 0) {
+            int gained = game.hpUpgradeAmount;
+            game.playerBonusHp += gained;
+            game.hpUpgradePrice += game.hpUpgradePrice / 4;
+            game.hpUpgradeAmount += game.hpUpgradeAmount / 4;
+            crateResultText = "+" + gained + " HP MAX!";
+        } else if (roll == 1) {
+            int gained = game.czystoscUpgradeAmount;
+            game.czystoscBonusMax += gained;
+            game.czystoscUpgradePrice += game.czystoscUpgradePrice / 4;
+            game.czystoscUpgradeAmount += game.czystoscUpgradeAmount / 4;
+            crateResultText = "+" + gained + " CZYSTOSC MAX!";
+        } else {
+            int bonus = 500;
+            game.money += bonus;
+            crateResultText = "+500 monet!";
+        }
+        crateResultTimer = 3f;
     }
 
     private void drawShopView() {
@@ -392,6 +844,25 @@ public class MenuScreen implements Screen {
         game.font.setColor(Color.GRAY);
         game.font.draw(game.batch, "Ksiadz Biskup", itemX, skinY - 45);
 
+        // Crates - stacked vertically, bigger
+        float crateSize = 130;
+        float crateX = SHOP_X + SHOP_W / 2f - crateSize / 2f;
+        float crate1Y = H - 730;
+        float crate2Y = crate1Y - crateSize - 18;
+        int crateCost = 1000;
+        if (game.skrzynka1Tex != null) {
+            game.batch.draw(game.skrzynka1Tex, crateX, crate1Y, crateSize, crateSize);
+            game.batch.draw(game.skrzynka1Tex, crateX, crate2Y, crateSize, crateSize);
+        }
+        game.font.getData().setScale(0.6f);
+        game.font.setColor(game.money >= crateCost ? Color.GREEN : Color.RED);
+        game.font.draw(game.batch, "" + crateCost, crateX + 25, crate1Y - 5);
+        game.font.draw(game.batch, "" + crateCost, crateX + 25, crate2Y - 5);
+        game.font.getData().setScale(0.5f);
+        game.font.setColor(Color.WHITE);
+        game.font.draw(game.batch, "Losowe ulepszenie", crateX - 5, crate1Y - 24);
+        game.font.draw(game.batch, "Losowe ulepszenie", crateX - 5, crate2Y - 24);
+
         // Close hint
         game.font.getData().setScale(0.5f);
         game.font.setColor(Color.GRAY);
@@ -399,6 +870,58 @@ public class MenuScreen implements Screen {
 
         game.font.getData().setScale(1f);
         game.batch.end();
+
+        // Crate opening animation overlay
+        if (crateAnimActive) {
+            float centerX = W / 2f;
+            float centerY = H / 2f;
+
+            if (crateAnimTimer < CRATE_ANIM_GROW) {
+                // Growing phase: crate grows from purchase point toward center
+                float t = crateAnimTimer / CRATE_ANIM_GROW;
+                // ease-out curve
+                float ease = 1f - (1f - t) * (1f - t);
+                float curSize = 130 + (CRATE_TARGET_SIZE - 130) * ease;
+                float curCx = crateAnimFromX + (centerX - crateAnimFromX) * ease;
+                float curCy = crateAnimFromY + (centerY - crateAnimFromY) * ease;
+                if (game.skrzynka1Tex != null) {
+                    game.batch.begin();
+                    game.batch.draw(game.skrzynka1Tex,
+                            curCx - curSize / 2f, curCy - curSize / 2f, curSize, curSize);
+                    game.batch.end();
+                }
+            } else {
+                // Open phase: dim overlay + open crate + result text
+                Gdx.gl.glEnable(Gdx.gl.GL_BLEND);
+                Gdx.gl.glBlendFunc(Gdx.gl.GL_SRC_ALPHA, Gdx.gl.GL_ONE_MINUS_SRC_ALPHA);
+                shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
+                shapeRenderer.setColor(0f, 0f, 0f, 0.65f);
+                shapeRenderer.rect(0, 0, W, H);
+                shapeRenderer.end();
+                Gdx.gl.glDisable(Gdx.gl.GL_BLEND);
+
+                Texture openTex = game.skrzynkaOtwartaTex != null ? game.skrzynkaOtwartaTex : game.skrzynka2Tex;
+                game.batch.begin();
+                if (openTex != null) {
+                    game.batch.draw(openTex,
+                            centerX - CRATE_TARGET_SIZE / 2f,
+                            centerY - CRATE_TARGET_SIZE / 2f + 40,
+                            CRATE_TARGET_SIZE, CRATE_TARGET_SIZE);
+                }
+                game.menuFont.getData().setScale(0.9f);
+                game.menuFont.setColor(Color.YELLOW);
+                com.badlogic.gdx.graphics.g2d.GlyphLayout gl =
+                        new com.badlogic.gdx.graphics.g2d.GlyphLayout(game.menuFont, crateResultText);
+                game.menuFont.draw(game.batch, crateResultText,
+                        centerX - gl.width / 2f, centerY - CRATE_TARGET_SIZE / 2f + 15);
+                game.menuFont.getData().setScale(1f);
+                game.font.getData().setScale(0.55f);
+                game.font.setColor(Color.GRAY);
+                game.font.draw(game.batch, "Kliknij aby zamknac", centerX - 80, 30);
+                game.font.getData().setScale(1f);
+                game.batch.end();
+            }
+        }
     }
 
     private void handleEnemiesInput() {
@@ -1093,6 +1616,7 @@ public class MenuScreen implements Screen {
     }
 
     private void handleSettingsInput() {
+        if (importProfileOpen) return; // overlay handles its own clicks
         if (confirmReset) {
             if (Gdx.input.justTouched()) {
                 mouseTemp.set(Gdx.input.getX(), Gdx.input.getY(), 0);
@@ -1128,7 +1652,7 @@ public class MenuScreen implements Screen {
             float mx = mouseTemp.x;
             float my = mouseTemp.y;
             float panelW = 450;
-            float panelH = 400;
+            float panelH = 520;
             float panelX = W / 2f - panelW / 2f;
             float panelY = H / 2f - panelH / 2f;
             float px = panelX + 25;
@@ -1179,6 +1703,25 @@ public class MenuScreen implements Screen {
                 confirmReset = true;
             }
 
+            // Export profile (copy to clipboard)
+            float exportY = resetY - 70;
+            if (mx >= px && mx <= px + 280 && my >= exportY - 5 && my <= exportY + 25) {
+                game.clickSound.play(game.clickVolume);
+                Gdx.app.getClipboard().setContents(buildProfileExport());
+                exportCopiedTimer = 2.5f;
+            }
+
+            // Import / view profile from clipboard
+            float importY = exportY - 55;
+            if (mx >= px && mx <= px + 280 && my >= importY - 5 && my <= importY + 25) {
+                game.clickSound.play(game.clickVolume);
+                String clip = Gdx.app.getClipboard().getContents();
+                if (clip != null && clip.contains("=== PROFIL ITER LUCIS ===")) {
+                    importProfileText = clip;
+                    importProfileOpen = true;
+                }
+            }
+
             // Click outside settings panel closes it
             if (mx < panelX || mx > panelX + panelW || my < panelY || my > panelY + panelH) {
                 game.clickSound.play(game.clickVolume);
@@ -1187,9 +1730,42 @@ public class MenuScreen implements Screen {
         }
     }
 
+    private String buildProfileExport() {
+        String[] abilityNames2 = {"Odbicie","Leczenie","Oswiecenie","Modlitwa","Zdrowas","Skok","Egzorcyzm","Benedykcja","Namaszczenie"};
+        StringBuilder sb = new StringBuilder();
+        sb.append("=== PROFIL ITER LUCIS ===\n");
+        sb.append("Imie: ").append(game.playerName).append("\n");
+        sb.append("Najlepszy wynik: ").append(game.highScore).append("\n");
+        sb.append("Kasa: ").append(game.money).append(" monet\n");
+        sb.append("Skin biskupa: ").append(game.bishopSkin ? "odblokowany" : "nie").append("\n");
+        sb.append("Max HP: ").append(100 + game.playerBonusHp)
+          .append(" (+").append(game.playerBonusHp).append(" ulepszen)\n");
+        sb.append("Max Czystosc: ").append(100 + game.czystoscBonusMax)
+          .append(" (+").append(game.czystoscBonusMax).append(" ulepszen)\n");
+        sb.append("Zdolnosci: ");
+        for (int i = 0; i < game.selectedAbilities.length; i++) {
+            int id = game.selectedAbilities[i];
+            String name = (id >= 0 && id < abilityNames2.length) ? abilityNames2[id] : "brak";
+            if (i > 0) sb.append(", ");
+            sb.append(name);
+        }
+        sb.append("\n");
+        sb.append("Ostatnie wyniki:");
+        boolean anyScore = false;
+        for (int s : game.recentScores) { if (s > 0) { anyScore = true; break; } }
+        if (!anyScore) {
+            sb.append(" brak");
+        } else {
+            for (int s : game.recentScores) { if (s > 0) sb.append(" ").append(s); }
+        }
+        sb.append("\n");
+        sb.append("=========================\n");
+        return sb.toString();
+    }
+
     private void drawSettingsOverlay() {
         float panelW = 450;
-        float panelH = 400;
+        float panelH = 520;
         float panelX = W / 2f - panelW / 2f;
         float panelY = H / 2f - panelH / 2f;
 
@@ -1256,6 +1832,22 @@ public class MenuScreen implements Screen {
         game.font.setColor(Color.RED);
         game.font.draw(game.batch, "[ RESETUJ PROFIL ]", px, resetY);
 
+        // Export profile
+        float exportY = resetY - 70;
+        game.font.getData().setScale(0.6f);
+        if (exportCopiedTimer > 0) {
+            game.font.setColor(Color.GREEN);
+            game.font.draw(game.batch, "[ SKOPIUJ PROFIL ]   Skopiowano!", px, exportY);
+        } else {
+            game.font.setColor(new Color(0.4f, 0.9f, 1f, 1f));
+            game.font.draw(game.batch, "[ SKOPIUJ PROFIL ]", px, exportY);
+        }
+
+        // Import / view profile from clipboard
+        float importY = exportY - 55;
+        game.font.setColor(new Color(0.8f, 0.6f, 1f, 1f));
+        game.font.draw(game.batch, "[ WCZYTAJ PROFIL ZE SCHOWKA ]", px, importY);
+
         // Hint
         game.font.getData().setScale(0.35f);
         game.font.setColor(Color.GRAY);
@@ -1267,6 +1859,66 @@ public class MenuScreen implements Screen {
         // Confirm reset overlay
         if (confirmReset) {
             drawConfirmResetOverlay();
+        }
+        // Import profile overlay
+        if (importProfileOpen) {
+            drawImportProfileOverlay();
+        }
+    }
+
+    private void drawImportProfileOverlay() {
+        float boxW = 520;
+        float boxH = 380;
+        float boxX = W / 2f - boxW / 2f;
+        float boxY = H / 2f - boxH / 2f;
+
+        Gdx.gl.glEnable(Gdx.gl.GL_BLEND);
+        shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
+        shapeRenderer.setColor(0, 0, 0, 0.85f);
+        shapeRenderer.rect(0, 0, W, H);
+        shapeRenderer.end();
+
+        shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
+        shapeRenderer.setColor(0.08f, 0.08f, 0.2f, 1f);
+        shapeRenderer.rect(boxX, boxY, boxW, boxH);
+        shapeRenderer.end();
+        Gdx.gl.glDisable(Gdx.gl.GL_BLEND);
+
+        shapeRenderer.begin(ShapeRenderer.ShapeType.Line);
+        shapeRenderer.setColor(new Color(0.4f, 0.9f, 1f, 1f));
+        shapeRenderer.rect(boxX, boxY, boxW, boxH);
+        shapeRenderer.end();
+
+        game.batch.begin();
+        float tx = boxX + 20;
+        float ty = boxY + boxH - 25;
+
+        game.font.getData().setScale(0.7f);
+        game.font.setColor(new Color(0.4f, 0.9f, 1f, 1f));
+        game.font.draw(game.batch, "PROFIL ZE SCHOWKA", tx, ty);
+
+        game.font.getData().setScale(0.5f);
+        game.font.setColor(Color.WHITE);
+        String[] lines = importProfileText.split("\n");
+        float lineH = 26f;
+        float curY = ty - 35;
+        for (String line : lines) {
+            if (curY < boxY + 40) break;
+            if (!line.startsWith("===")) {
+                game.font.draw(game.batch, line, tx, curY);
+                curY -= lineH;
+            }
+        }
+
+        game.font.getData().setScale(0.45f);
+        game.font.setColor(Color.GRAY);
+        game.font.draw(game.batch, "Kliknij gdziekolwiek, zeby zamknac", tx, boxY + 20);
+
+        game.font.getData().setScale(1f);
+        game.batch.end();
+
+        if (Gdx.input.justTouched()) {
+            importProfileOpen = false;
         }
     }
 
@@ -1337,9 +1989,12 @@ public class MenuScreen implements Screen {
             overlayAlpha = 1f - (introTimer - phase3Start) / INTRO_BRIGHTEN;
             textAlpha = 1f;
         } else {
-            // Done — launch game
-            game.backgroundMusic.play();
-            game.setScreen(new BattleScreen(game));
+            // Done — solo goes to hub; multiplayer modes go directly to battle
+            if (game.multiplayerMode > 0) {
+                game.setScreen(new BattleScreen(game));
+            } else {
+                game.setScreen(new HubScreen(game));
+            }
             dispose();
             return;
         }
@@ -1372,7 +2027,23 @@ public class MenuScreen implements Screen {
     }
 
     @Override public void resize(int width, int height) {}
-    @Override public void show() {}
+    @Override public void show() {
+        Gdx.input.setInputProcessor(new InputAdapter() {
+            @Override
+            public boolean scrolled(float amountX, float amountY) {
+                if (equipmentOpen) {
+                    float maxScroll = Math.max(0, ABILITY_NAMES.length * EQUIP_ROW_H - equipListVisibleH());
+                    equipScrollOffset = MathUtils.clamp(equipScrollOffset + amountY * 40f, 0, maxScroll);
+                }
+                return true;
+            }
+        });
+    }
+
+    private float equipListVisibleH() {
+        // List area height (bottom of list = panelY+80, top = panelY+panelH-320)
+        return (60 + 870 - 320) - (60 + 80);
+    }
     @Override public void pause() {}
     @Override public void resume() {}
     @Override public void hide() {}

@@ -20,8 +20,12 @@ public class LoadingScreen implements Screen {
 
     @Override
     public void render(float delta) {
-        // Load one asset per frame
-        boolean done = game.loadNext();
+        // Load up to 10 assets per frame for faster startup
+        boolean done = false;
+        for (int i = 0; i < 10; i++) {
+            done = game.loadNext();
+            if (done) break;
+        }
 
         float progress = game.getLoadingProgress();
 

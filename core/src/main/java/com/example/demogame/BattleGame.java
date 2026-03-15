@@ -84,6 +84,13 @@ public class BattleGame extends Game {
     public Texture biskupLeczenieTex;
     // Relikwie (levels 1-5)
     public Texture[] relikwiaTex;
+    // Selected abilities (3 slots, indices: 0=Odbicie,1=Leczenie,2=Oswiecenie,3=Modlitwa,4=Zdrowas,5=Skok)
+    public int[] selectedAbilities = {0, 1, 2};
+
+    // Crates (shop)
+    public Texture skrzynka1Tex;
+    public Texture skrzynka2Tex;
+    public Texture skrzynkaOtwartaTex;
     // Profile pictures
     public Texture[] profiloweTex;
     public int profilePictureIndex = -1;
@@ -96,10 +103,10 @@ public class BattleGame extends Game {
     public Sound clickSound;
     public int highScore;
     public int money;
-    public int hpUpgradePrice = 70;
+    public int hpUpgradePrice = 700;
     public int hpUpgradeAmount = 30;
     public int playerBonusHp = 0;      // total HP bonus from all purchased upgrades
-    public int czystoscUpgradePrice = 100;
+    public int czystoscUpgradePrice = 1000;
     public int czystoscUpgradeAmount = 50;
     public int czystoscBonusMax = 0;   // total czystosc bonus from all purchased upgrades
     public boolean bishopSkin;
@@ -112,6 +119,8 @@ public class BattleGame extends Game {
     public float clickVolume = 1.0f;
     public int currentProfileId = 0;
     public int profileCount = 1;
+    public int[] recentScores = new int[10];
+    public int multiplayerMode = 0; // 0=solo, 1=coop, 2=vs
 
     // Loading steps - each step loads one or more assets
     private Runnable[] loadingSteps;
@@ -122,7 +131,7 @@ public class BattleGame extends Game {
     public void create() {
         batch = new SpriteBatch();
 
-        FreeTypeFontGenerator generator = new FreeTypeFontGenerator(Gdx.files.internal("czcionka/ARCADEPI.TTF"));
+        FreeTypeFontGenerator generator = new FreeTypeFontGenerator(Gdx.files.internal("czcionka/lady_radical/ARCADEPI.TTF"));
         FreeTypeFontGenerator.FreeTypeFontParameter param = new FreeTypeFontGenerator.FreeTypeFontParameter();
         param.size = 24;
         param.color = Color.WHITE;
@@ -189,7 +198,7 @@ public class BattleGame extends Game {
             () -> hpUpgradeTex = new Texture(Gdx.files.internal("bronie/HP-upgrade.png")),
             () -> sklepTex = new Texture(Gdx.files.internal("tlo/sklep.png")),
             () -> przedstawienieTelefonTex = new Texture(Gdx.files.internal("tlo/przedstawienie-demon-telefon.png")),
-            () -> zlyOgrodnikTloTex = new Texture(Gdx.files.internal("tlo/ZlyOgrodnikTlo.jpg")),
+            () -> zlyOgrodnikTloTex = new Texture(Gdx.files.internal("tlo/ZlyOgrodnikTlo.png")),
             () -> zlyOgrodnikTex = new Texture(Gdx.files.internal("postacie/MiniBossy/ZlyOgrodnik.png")),
             () -> zlyOgrodnikLewoTex = new Texture(Gdx.files.internal("postacie/MiniBossy/ZlyOgrodnikLewo.png")),
             () -> zlyOgrodnikAtakTex = new Texture(Gdx.files.internal("postacie/MiniBossy/ZlyOgrodnikAtak.png")),
@@ -215,6 +224,9 @@ public class BattleGame extends Game {
                 new Texture(Gdx.files.internal("bronie/relikwia_4-removebg-preview.png")),
                 new Texture(Gdx.files.internal("bronie/relikwia_5-removebg-preview.png")),
             },
+            () -> skrzynka1Tex = new Texture(Gdx.files.internal("all/skrzynka1.png")),
+            () -> skrzynka2Tex = new Texture(Gdx.files.internal("all/skrzynka2.png")),
+            () -> skrzynkaOtwartaTex = new Texture(Gdx.files.internal("all/sskrzynka otwarta1.png")),
             () -> profiloweTex = new Texture[] {
                 new Texture(Gdx.files.internal("all/profillowe1.png")),
                 new Texture(Gdx.files.internal("all/profilowe2.png")),
@@ -269,6 +281,9 @@ public class BattleGame extends Game {
                 com.badlogic.gdx.graphics.Texture.TextureFilter.Linear,
                 com.badlogic.gdx.graphics.Texture.TextureFilter.Linear);
         }
+        if (skrzynka1Tex != null) skrzynka1Tex.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
+        if (skrzynka2Tex != null) skrzynka2Tex.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
+        if (skrzynkaOtwartaTex != null) skrzynkaOtwartaTex.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
         if (profiloweTex != null) for (Texture t : profiloweTex) {
             if (t != null) t.setFilter(
                 com.badlogic.gdx.graphics.Texture.TextureFilter.Linear,
@@ -312,6 +327,10 @@ public class BattleGame extends Game {
         prefs.putFloat(p + "musicVolume", musicVolume);
         prefs.putFloat(p + "clickVolume", clickVolume);
         prefs.putInteger(p + "profilePictureIndex", profilePictureIndex);
+        prefs.putInteger(p + "sel0", selectedAbilities[0]);
+        prefs.putInteger(p + "sel1", selectedAbilities[1]);
+        prefs.putInteger(p + "sel2", selectedAbilities[2]);
+        for (int i = 0; i < 10; i++) prefs.putInteger(p + "rs" + i, recentScores[i]);
         prefs.flush();
     }
 
@@ -361,6 +380,10 @@ public class BattleGame extends Game {
         musicVolume = prefs.getFloat(p + "musicVolume", 0.5f);
         clickVolume = prefs.getFloat(p + "clickVolume", 1.0f);
         profilePictureIndex = prefs.getInteger(p + "profilePictureIndex", -1);
+        selectedAbilities[0] = prefs.getInteger(p + "sel0", 0);
+        selectedAbilities[1] = prefs.getInteger(p + "sel1", 1);
+        selectedAbilities[2] = prefs.getInteger(p + "sel2", 2);
+        for (int i = 0; i < 10; i++) recentScores[i] = prefs.getInteger(p + "rs" + i, 0);
         if (backgroundMusic != null) backgroundMusic.setVolume(musicVolume);
     }
 
@@ -378,6 +401,16 @@ public class BattleGame extends Game {
         seenDemon = false;
         seenTelefon = false;
         profilePictureIndex = -1;
+        selectedAbilities[0] = 0; selectedAbilities[1] = 1; selectedAbilities[2] = 2;
+        recentScores = new int[10];
+        saveData();
+    }
+
+    public void addRecentScore(int score) {
+        if (score <= 0) return;
+        for (int i = 9; i > 0; i--) recentScores[i] = recentScores[i - 1];
+        recentScores[0] = score;
+        if (score > highScore) highScore = score;
         saveData();
     }
 
@@ -538,6 +571,9 @@ public class BattleGame extends Game {
         siostryKsiegarniAtak1Tex.dispose();
         siostryKsiegarniAtak2Tex.dispose();
         if (relikwiaTex != null) for (Texture t : relikwiaTex) if (t != null) t.dispose();
+        if (skrzynka1Tex != null) skrzynka1Tex.dispose();
+        if (skrzynka2Tex != null) skrzynka2Tex.dispose();
+        if (skrzynkaOtwartaTex != null) skrzynkaOtwartaTex.dispose();
         if (profiloweTex != null) for (Texture t : profiloweTex) if (t != null) t.dispose();
         backgroundMusic.dispose();
         if (battleMusic != null) battleMusic.dispose();
